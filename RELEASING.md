@@ -197,4 +197,106 @@ publisher is configured on an existing package. Follow
 
 ## Rollback
 
-To be written (US-013).
+Use this when a published version breaks skills on hosts. A rollback needs
+no hq-core release. Steps 1 and 2 pull the bad version back from every host;
+step 3 ships the fix; step 4 is only for a broken range.
+
+### How hosts pick a version
+
+hq-cli's resolver (`src/lib/core-skills-pack/resolve.ts`) installs the
+highest version that satisfies the pin range in `src/lib/core-skills-pack/pin.ts`,
+is not deprecated on npm, still has an approved marketplace listing, and
+whose `engines["hq-core"]` admits the host's hq-core. When the installed
+version stops qualifying, the next refresh installs the best version that
+does, which may be a lower one. A hold (`hq packs hold`) overrides all of
+this on that host.
+
+### 1. Deprecate the bad version on npm
+
+Someone with publish rights on the package (for example the `hq-agent`
+account through HQ secrets, as in the bootstrap section) runs:
+
+```bash
+npm deprecate @indigoai-us/hq-pack-core-skills@<bad> "<reason>"
+```
+
+Deprecation is enough on its own for the resolver to skip the version. Do
+not `npm unpublish`: the version slot stays used either way, and the
+deprecation message tells people why.
+
+### 2. Withdraw the marketplace listing
+
+HQ staff yank the `core-skills` listing for that version. The action is
+**yank** (the moderation console's yank action, or the API below). Reject
+does not apply: it only moves a `pending_review` listing, and
+`hq staff listings` has `queue`, `approve` and `reject` but no yank command.
+
+```bash
+# listing id for the bad version
+curl -s "https://hqapi.hq.computer/v1/listings?slug=core-skills&version=<bad>"
+# staff Cognito id_token (email on an allowed staff domain)
+POST https://hqapi.hq.computer/v1/moderation/listings/{id}/yank
+     body {"reason": "<reason>"}
+```
+
+Yank sets the listing to `yanked`. It can be applied to an `approved`,
+`pending_review` or `superseded` listing and needs a reason. A yanked listing
+is gone from browse, detail and install at once, so the resolver treats the
+version as withdrawn (`MarketplaceListingNotFoundError`), and a fresh
+`hq install marketplace:core-skills@<bad>` fails. Hosts that already have it
+keep it until their next refresh. Older versions that were superseded when
+`<bad>` was approved stay installable by exact version, which is what lets a
+host move back down.
+
+`node scripts/verify-release.mjs <bad>` fails after the yank; that is expected.
+
+### 3. Publish the revert as the next patch
+
+Revert the change on `main` by pull request and release it as `<bad>+1`
+(for example 1.2.1 is bad, release 1.2.2) through the normal steps 1 to 7
+above. Never reuse or move the bad tag. Until the patch is approved, hosts
+sit on the highest good version below `<bad>`; after it, they move to the
+patch.
+
+### 4. Broken range: narrow the pin in hq-cli
+
+When every version from some point on is bad and steps 1 to 3 cannot fix it
+in time (for example a new major line that no older hq-cli should take),
+ship an hq-cli patch that narrows `range` in `src/lib/core-skills-pack/pin.ts`
+(for example `^1.0.0` to `>=1.0.0 <1.3.0`). `floor` must still satisfy the
+range (`pin.test.ts`). A changed range makes every host's resolver cache
+stale, so hosts re-resolve on the first refresh after they update hq-cli.
+Hosts that do not update hq-cli are covered only by steps 1 and 2.
+
+### Time to recover
+
+- A host moves off the bad version on its next resolver refresh. A refresh
+  goes to the network when the cache in `.hq/core-skills-pack.json` is
+  older than 24 hours, so a host recovers within 24 hours of step 1 or 2.
+  `hq rescue` runs the refresh too.
+- A host recovers at once with `hq packs update hq-pack-core-skills`, which
+  re-resolves with the cache age ignored and installs the result.
+- Agent boxes run `hq rescue` on their own schedule (about every 6 hours), so
+  they recover on the first rescue after the cache is stale, or at once with
+  `hq packs update hq-pack-core-skills` on the box.
+
+### Holding agent boxes on a known-good version
+
+`hq packs hold hq-pack-core-skills@<good>` freezes a box on one exact
+version: the resolver returns the hold before it looks at npm or the
+marketplace, so refreshes, rescue and `hq packs update` leave the box there.
+Run `hq packs update hq-pack-core-skills` after setting a hold to install
+the held version now. `hq packs hold --clear` releases the box back to the
+pin range. A hold is stored in `.hq/core-skills-pack-hold.json`, separate
+from the resolver cache, and survives rescue. A box held on `<bad>` stays on
+it until the hold is cleared or moved, so check held boxes during a
+rollback (`hq packs list` shows `hold`).
+
+### Tested
+
+hq-cli's `test/integration/core-skills-rollback.test.ts` runs the rollback
+end to end: the real `npm publish` and `npm deprecate` against a local npm
+registry, an install of the newer version, then deprecation (and, in a
+second case, a withdrawn listing) of that version, and
+`hq packs update hq-pack-core-skills` moving the host down to the highest
+version still in range.
