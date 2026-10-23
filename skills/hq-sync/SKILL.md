@@ -1,0 +1,394 @@
+---
+name: hq-sync
+description: Run a full bidirectional sync for cloud-backed HQ companies.
+allowed-tools: Bash, Read, Bash(. .claude/skills/hq-sync/scripts/hq-sync-events.sh:*)
+---
+
+# /hq-sync — Full HQ sync from the CLI
+
+Runs the same sync engine the HQ Desktop App uses, from the
+terminal. Walks every cloud-backed company in your local HQ, syncs in
+both directions against the vault, and records divergence in
+`<hqRoot>/.hq-conflicts/index.json` so `/resolve-conflicts` can walk it.
+
+Sync modes, ignore rules, conflicts, the journal, session logs, and
+`hq daemon`: see `core/knowledge/public/hq-core/hq-sync-model.md`.
+
+**Args:** `$ARGUMENTS` — optional flags. Defaults: `--direction both --on-conflict keep`.
+
+## What you do
+
+### Step 1 — Resolve HQ root
+
+The same 4-tier resolver the HQ Desktop App uses:
+
+1. `~/.hq/menubar.json` `hqPath` (canonical, written by hq-installer ≥0.1.28)
+2. `~/.hq/config.json` `hqFolderPath` (legacy installer path)
+3. Discovery via `core/core.yaml` signature in `~/HQ`, `~/hq`, `~/Documents/HQ`, `~/Documents/hq`, `~/Desktop/HQ`, `~/Desktop/hq` (first match wins)
+4. `~/HQ` (last-resort default)
+
+Fast path: if cwd contains a `core/core.yaml`, use cwd. Otherwise read `~/.hq/menubar.json`.
+
+### Step 2 — Auth check
+
+Confirm `~/.hq/cognito-tokens.json` exists. If it is absent, tell the user
+"Not signed in — run /hq-login" and exit 2.
+
+Do not inspect the token's contents or judge whether it is expired. The runner
+owns token validity: it refreshes an expired access token from the stored
+refresh token on its own, and `expiresAt` is typed `string | number`, so any
+arithmetic here is both redundant and liable to fail on the ISO-string form.
+When the runner cannot get a valid token it emits an `auth-error` event on
+stderr — that event, not a local clock comparison, is the signal to send the
+user to `/hq-login`.
+
+### Step 3 — Spawn the runner
+
+Same runner and flags the HQ Desktop App spawns. The version differs: the
+desktop app pins `@indigoai-us/hq-cloud@~6.18.5` (>=6.18.5 <6.19.0) via
+`HQ_CLOUD_VERSION` in `crates/hq-desktop-core/src/hq_cloud.rs` (hq-desktop-app
+origin/main `c621a6a`, 2026-09-27), while this skill requests `@latest`, which
+can resolve to a newer minor than the desktop runs:
+
+```bash
+npx -y --package=@indigoai-us/hq-cloud@latest hq-sync-runner \
+  --companies \
+  --direction both \
+  --on-conflict keep \
+  --hq-root <hqRoot>
+```
+
+Apply user-supplied overrides for `--direction` and `--on-conflict` if
+present in `$ARGUMENTS`.
+
+Stream stdout (ndjson — one event per line). Show meaningful events to
+the user:
+- `{"type":"plan", company, direction, filesToDownload, ...}` → "Planning sync for {company} {direction}: {N} files / {M} bytes"
+- `{"type":"progress", path, bytes, message?}` → quiet (just count)
+- `{"type":"conflict", path, direction, resolution}` → "⚠️ Conflict: {path} ({direction}) — {resolution}"
+- `{"type":"complete", company, filesDownloaded, filesUploaded, conflicts, ...}` → "✓ {company}: {filesDownloaded}↓ {filesUploaded}↑ {conflicts}⚠"
+- `{"type":"all-complete", companiesAttempted, conflictPaths, errors, partial, transient, companies}` → final summary. `partial` and `companies[].status` are the canonical completeness signals — see Step 4.
+- `{"type":"conflicts-remaining", count, samplePaths}` → emitted once after
+  `all-complete` when the post-sync ledger prune preserved conflict rows a
+  human still has to resolve. See Step 4.
+- `{"type":"setup-needed", reason, pendingInviteCount?}` → the run could not
+  proceed. NOT a silent success — see Step 5b.
+
+On stderr:
+- `{"type":"auth-error", message}` → no valid token. Print
+  "Not signed in — run /hq-login" and exit 2.
+- `{"type":"error", ...}` → per-file or per-company diagnostics, surfaced at
+  Step 5d.
+
+### Step 4 — Final summary
+
+Print the totals from `all-complete`:
+
+```
+=== Summary ===
+Companies synced: N
+Files: D ↓ / U ↑
+Conflicts: K
+Errors: E
+```
+
+If `K === 0`, omit the conflicts list and the `/resolve-conflicts` suggestion.
+If `errors[]` is non-empty, list each entry.
+
+Then report completeness honestly. `errors.length > 0` is not sufficient: a
+company that cleanly conflict-aborted never lands in `errors`. Read `partial`
+and `companies[].status`. When `partial` is true, list every company whose
+status is not `complete` with that status (`aborted`, `errored`, or
+`transient-network`), list the `transient[]` diagnostics, and exit 3.
+
+Map the runner's exit codes to plain language:
+
+| Runner exit | What it means | What the skill prints |
+|---|---|---|
+| 0 | the protocol finished | the summary above |
+| 1 | bad arguments, or a failure before the sync started | the runner's diagnostics |
+| 2 | at least one company failed deterministically | the partial block |
+| 17 | another sync (Auto-sync or the HQ Desktop App) holds the lock | "Another sync was already running ... did not sync. Nothing failed." The skill exits 0. |
+| 75 | a retryable network failure interrupted the run | "The network interrupted the sync. Nothing is corrupt. Run /hq-sync again." |
+
+The skill's own exit codes: 0 clean (or another sync was already running),
+2 not signed in, 3 partial (at least one company did not complete), and the
+runner's code passed through otherwise.
+
+When the runner emits
+`{"type":"scope-materialization-gap", company, count, samplePaths, syncMode}`,
+print the company, count, sample paths, and the two remedies: `hq sync mode all
+--company <slug>` or `hq files get companies/<slug>/<path>`. The runner emits
+this event only for files its plan marked `skip-out-of-scope`. A `shared` or
+`custom` pull that lists only its granted prefixes (for example `knowledge/`)
+never enumerates root-level files such as `board.json`, so it can emit no
+event for them. No gap block does not mean every company file was downloaded.
+
+Finally, report conflict residue from both places it lives:
+
+- The `conflicts-remaining` event carries the ledger rows the post-sync prune
+  preserved. Print `count`, the sample paths, and the `/resolve-conflicts`
+  pointer.
+- Legacy `.conflict-<timestamp>-<machine>` twins sit on disk outside the
+  ledger, so `/resolve-conflicts` cannot see them. Count them under the HQ root
+  (skipping `node_modules`, `.git`, and `workspace/tmp`) and, when the count is
+  nonzero, print it with the command that previews folding them back:
+
+```
+hq sync doctor --reconcile-conflicts --hq-root <hqRoot>
+```
+
+That form is a dry run; it reports what it would do and changes nothing.
+Adding `--yes` is what applies it.
+
+## Implementation
+
+```bash
+set -euo pipefail
+
+# Step 1: resolve HQ root
+hq_root=""
+if [ -f "$PWD/core/core.yaml" ]; then
+  hq_root="$PWD"
+elif [ -f "$HOME/.hq/menubar.json" ]; then
+  hq_root="$(jq -r '.hqPath // empty' "$HOME/.hq/menubar.json" 2>/dev/null || true)"
+fi
+if [ -z "$hq_root" ] && [ -f "$HOME/.hq/config.json" ]; then
+  hq_root="$(jq -r '.hqFolderPath // empty' "$HOME/.hq/config.json" 2>/dev/null || true)"
+fi
+if [ -z "$hq_root" ]; then
+  for d in "$HOME/HQ" "$HOME/hq" "$HOME/Documents/HQ" "$HOME/Documents/hq" "$HOME/Desktop/HQ" "$HOME/Desktop/hq"; do
+    if [ -f "$d/core/core.yaml" ]; then hq_root="$d"; break; fi
+  done
+fi
+if [ -z "$hq_root" ]; then
+  echo "ERROR: no HQ folder found — run from inside an HQ tree, or set ~/.hq/menubar.json hqPath" >&2
+  exit 1
+fi
+echo "HQ root: $hq_root"
+
+# Event handling lives in a sibling script so the code path a user gets is the
+# one the test suite exercises against recorded ndjson fixtures
+# (the tests folder beside this skill). The skill body runs pasted into a shell,
+# so BASH_SOURCE may not point at the skill folder — the resolved HQ root is the
+# reliable anchor, with the per-user skills tree as the fallback. Source it with
+# one plain command, run from the directory that holds it, so allowed-tools can
+# name that exact command instead of a shell construct.
+events_home="$hq_root"
+test -f "$hq_root/.claude/skills/hq-sync/scripts/hq-sync-events.sh" || events_home="$HOME"
+cd "$events_home"
+# shellcheck source=/dev/null
+. .claude/skills/hq-sync/scripts/hq-sync-events.sh || true
+cd "$hq_root"
+if ! command -v hq_sync_report_summary >/dev/null 2>&1; then
+  echo "ERROR: hq-sync-events.sh not found — reinstall the hq-sync skill" >&2
+  exit 1
+fi
+
+# Step 2: auth check. File presence only — the runner owns token validity. It
+# refreshes an expired access token from the stored refresh token, and the
+# expiresAt field is typed `string | number`, so comparing it here both
+# duplicated that logic and died under `set -e` on the ISO-string form. An
+# actually-unusable token arrives as an `auth-error` event, handled at Step 4b.
+if [ ! -f "$HOME/.hq/cognito-tokens.json" ]; then
+  hq_sync_print_auth_error
+  exit 2
+fi
+
+# Step 3: parse user args (defaults match the HQ Desktop App). Claude Code
+# replaces the ARGUMENTS placeholder on the `set --` line with the skill's arguments (nothing
+# when there are none), so the while-case parser sees them as positional args
+# under both bash and zsh. Read positionals as ${1}/${2}: Claude Code would
+# also replace a bare dollar-digit with a skill argument.
+direction="both"
+on_conflict="keep"
+# shellcheck disable=SC2086 — intentional word-split of the arguments
+set -- $ARGUMENTS
+while [ $# -gt 0 ]; do
+  case "${1}" in
+    --direction) direction="${2:-both}"; shift; [ $# -gt 0 ] && shift ;;
+    --on-conflict) on_conflict="${2:-keep}"; shift; [ $# -gt 0 ] && shift ;;
+    *) shift ;;
+  esac
+done
+
+# Step 4: spawn the runner. `set -o pipefail` is the portable way to capture
+# the exit status of the LEFT side of `| tee` under both bash and zsh —
+# avoids ${PIPESTATUS[0]} (bash-only) and ${pipestatus[1]} (zsh-only, 1-based).
+echo "Spawning hq-sync-runner (this is the same engine the HQ Desktop App uses)..."
+output_file="$(mktemp)"
+# Keep stderr in its own file. Folding it into stdout with `2>&1` left the
+# runner's diagnostics (claim-dance skips, manifest reconciliation) buried in
+# the ndjson stream where nobody read them — the failures that make a joiner
+# look solo were being reported and then lost.
+err_file="$(mktemp)"
+set +e
+set -o pipefail 2>/dev/null || true
+npx -y --package=@indigoai-us/hq-cloud@latest hq-sync-runner \
+  --companies \
+  --direction "$direction" \
+  --on-conflict "$on_conflict" \
+  --hq-root "$hq_root" 2>"$err_file" | tee "$output_file"
+# zsh reserves $status (mirrors $?), so we use cli_status to avoid
+# `read-only variable: status` errors when the slash command runs under zsh.
+cli_status=$?
+set +o pipefail 2>/dev/null || true
+set -e
+
+# Step 4b: auth-error. The runner routes it to stderr, so it never reaches the
+# ndjson stream on stdout. This is the only expired/absent-token signal the
+# skill trusts.
+if hq_sync_has_auth_error "$err_file"; then
+  hq_sync_print_auth_error
+  rm -f "$output_file" "$err_file"
+  exit 2
+fi
+
+# Step 5: summary + honest completeness read. hq_sync_report_summary returns
+# HQ_SYNC_PARTIAL_EXIT when the runner reported partial: true, so the `||`
+# keeps `set -e` from killing the script on that expected status.
+final_event="$(grep -E '^\{"type":"all-complete"' "$output_file" | tail -1 || true)"
+files_d=0
+if [ -n "$final_event" ]; then
+  files_d=$(printf '%s' "$final_event" | jq -r '.filesDownloaded // 0' 2>/dev/null || echo 0)
+fi
+# Tombstone counts are on per-company complete events, not all-complete.
+files_t="$(hq_sync_count_tombstoned_files "$output_file")"
+summary_status=0
+hq_sync_report_summary "$output_file" || summary_status=$?
+
+# Step 5b: setup-needed. The runner exits 0 here on purpose (a non-zero exit
+# would make the watch loop report spurious crashes), so without this branch a
+# user who is blocked sees a silent, successful-looking run.
+setup_event="$(grep -E '^\{"type":"setup-needed"' "$output_file" | tail -1 || true)"
+if [ -n "$setup_event" ]; then
+  # This whole script runs under `set -euo pipefail`. The grep above matches on
+  # a PREFIX, so a line truncated mid-write still reaches jq — and then jq exits
+  # non-zero, the command substitution inherits that status, and `set -e` kills
+  # the script. That would take out the one branch whose entire job is to stop a
+  # blocked user from seeing a silent, successful-looking run. Never let parsing
+  # the diagnostic be the thing that suppresses the diagnostic.
+  reason=$(printf '%s' "$setup_event" | jq -r '.reason // "unknown"' 2>/dev/null || echo "unknown")
+  pending=$(printf '%s' "$setup_event" | jq -r '.pendingInviteCount // 0' 2>/dev/null || echo 0)
+  # `[ "$pending" -gt 0 ]` needs an integer. jq yields a non-numeric if the field
+  # is ever sent as a string, and an empty string if the parse failed above.
+  case "$pending" in ''|*[!0-9]*) pending=0 ;; esac
+
+  echo ""
+  echo "=== Sync could not complete ==="
+  if [ "$pending" -gt 0 ]; then
+    echo "You have $pending invite(s) waiting to be accepted — that is why no"
+    echo "company synced. You are NOT solo."
+    echo ""
+    echo "Run: /accept <link-or-token>"
+    echo "Then re-run /hq-sync."
+  else
+    case "$reason" in
+      no-memberships)
+        echo "You are signed in, but you do not belong to any cloud company yet."
+        echo "If you were expecting an invite, ask whoever invited you to re-send"
+        echo "it, then run /accept <link-or-token>."
+        ;;
+      no-person-entity)
+        echo "You are signed in, but you have no personal entity to sync into."
+        echo "This usually means a legacy magic-link invite that still needs"
+        echo "redeeming: /accept <link-or-token>"
+        ;;
+      *)
+        echo "The runner reported it could not proceed, without a reason"
+        echo "(reason: $reason). This is usually an older runner. Try"
+        echo "/accept <link-or-token> if you are expecting an invite."
+        ;;
+    esac
+  fi
+fi
+
+# Step 5c: neither event. Say so — a run that reports nothing is not a success,
+# and silently treating it as one is how a broken sync passes for a clean one.
+if [ -z "${final_event:-}" ] && [ -z "${setup_event:-}" ] \
+  && [ "$cli_status" != "${HQ_SYNC_RUNNER_LOCKED_EXIT:-17}" ]; then
+  echo ""
+  echo "=== Sync finished without a final status ==="
+  echo "The runner emitted neither all-complete nor setup-needed (exit"
+  echo "$cli_status). Treat this as an incomplete sync, not a clean one."
+fi
+
+# Step 5d: surface the runner's diagnostics. These are the breadcrumbs for
+# "why did nothing land" — claim-dance skips, manifest reconciliation, and
+# activeCompany seeding all report here.
+if [ -s "$err_file" ]; then
+  echo ""
+  echo "=== Runner diagnostics ==="
+  cat "$err_file"
+fi
+
+# Step 5e: conflict residue. Two sources, because they disagree: the runner's
+# conflicts-remaining event covers ledger rows the post-sync prune preserved,
+# while legacy `.conflict-*` twins sit on disk outside the ledger where
+# /resolve-conflicts cannot reach them.
+hq_sync_report_conflicts_remaining "$output_file" "$hq_root" || true
+
+# Step 5f: files the membership's sync mode kept out of this pull. A shared or
+# custom mode downloads only the shared paths, so root-level company files such
+# as board.json can be missing with nothing else saying why.
+if command -v hq_sync_report_scope_gaps >/dev/null 2>&1; then
+  hq_sync_report_scope_gaps "$output_file" || true
+fi
+
+# Step 6: reindex qmd so freshly-synced knowledge is searchable immediately.
+# Lexical update is fast (mtime-incremental) and auto-registers any new
+# company knowledge collection — kills the "I forgot to re-index after sync"
+# divergence between teammates. Embeddings are deferred (no --embed) to keep
+# sync snappy. Best-effort: never let reindex mask the sync exit code.
+if [ -z "${final_event:-}" ] || [ "${files_d:-0}" != "0" ]; then
+  hq core qmd-reindex-after-sync "$hq_root" >/dev/null 2>&1 || true
+fi
+
+# Step 6b: regenerate the workers registry after a completed sync.
+# The normal lifecycle reindex hook does not run for this out-of-band pull, and
+# worker-registry generation is separate from skill-wrapper surfacing. Without
+# this step, a stale core/workers/registry.yaml can list active workers whose
+# directories were never downloaded (or were pruned).
+# The generator is derived from worker.yaml files on disk: new workers appear,
+# missing directories drop. Best-effort; never mask sync.
+hq core --hq-root "$hq_root" generate-workers-registry >/dev/null 2>&1 || true
+
+# Step 6c: surface freshly pulled company skills. The --companies runner
+# skips its per-company reindex to avoid repeated work, so do one reindex after
+# the pull when it downloaded or tombstoned files. Wrappers live only on this
+# machine; without this step a teammate's /hq-sync leaves company skills
+# invisible until they run `hq reindex` by hand. Reindex also converges core,
+# personal, and pack skill wrappers; a failure warns but never changes the sync result.
+hq_sync_post_pull_reindex "$hq_root" "${files_d:-0}" "${files_t:-0}"
+
+# Step 7: exit. A partial run is not a clean one, so exit 3 (documented in
+# scripts/hq-sync-events.sh) even when the runner itself exited 0 after a clean
+# conflict-abort. Exit 75 is retryable and gets a plain explanation before the
+# code is passed through. Exit 17 (another sync holds the lock) is explained
+# and mapped to 0: the other pass does the work, so it is not a failure.
+hq_sync_exit_note "$cli_status"
+rm -f "$output_file" "$err_file"
+if [ "$summary_status" != "0" ]; then
+  exit "$summary_status"
+fi
+if [ "$cli_status" = "${HQ_SYNC_RUNNER_LOCKED_EXIT:-17}" ]; then
+  exit 0
+fi
+exit "$cli_status"
+```
+
+## Notes
+
+- Uses the **same `hq-sync-runner` invocation pattern** as the HQ Desktop App, with a different version spec. The desktop app pins the tilde range `~6.18.5` in `crates/hq-desktop-core/src/hq_cloud.rs::HQ_CLOUD_VERSION` and only moves when that constant is raised; this skill uses `@latest`. The two can run different hq-cloud minors.
+- `--on-conflict keep` is the default, same as the HQ Desktop App. It is version-aware: identical bytes are not a conflict, a higher frontmatter `version:` wins, then the newer mtime, otherwise the cloud copy. A losing local body is parked under `.hq/conflict-backups/` and the conflict is recorded in `.hq-conflicts/index.json`. Legacy `.conflict-*` twins from older engines are folded back with `hq sync doctor --reconcile-conflicts`. Details: `core/knowledge/public/hq-core/hq-sync-model.md`.
+- Auth is shared with `/deploy`, `/designate-team`, `/hq-login`, and the HQ Desktop App — single Cognito token at `~/.hq/cognito-tokens.json`.
+- For a single-company sync, use `hq sync push <company>` (already in hq-cli) — this command is the "all companies, both directions" full sync that the HQ Desktop App runs.
+- **Post-sync qmd reindex (Step 6):** after a sync that pulled files, the skill runs `hq core qmd-reindex-after-sync`, which auto-registers any new company knowledge collection and runs an incremental lexical `qmd update`. This is what makes freshly-synced knowledge searchable without a manual re-index, and keeps teammates' personal indexes converged. Embeddings are intentionally deferred (run `qmd embed`, or the reindex script with `--embed`, on an idle pass) so sync stays fast. The qmd index is per-machine (large binary, absolute local paths) and is **not** itself synced — only its freshness is automated. The HQ Desktop App sync gets the same behavior via the `hq-sync-runner` seam.
+- **Post-sync workers registry (Step 6b):** after a completed sync, regenerate `core/workers/registry.yaml` from on-disk `worker.yaml` files. A pulled worker must become listable, and a registry row whose directory was not downloaded must not stay discoverable. SessionStart also warns if any `status: active` path is still absent.
+- **Post-pull skill wrappers (Step 6c):** when the runner downloaded or tombstoned files, run the same idempotent `hq reindex` used by the CLI. It surfaces company skill wrappers (`<company>:<skill>`) and converges the other namespaced skills. This is best-effort and does not alter the sync exit code.
+
+- **Selective download (`syncMode`) — access ≠ download.** What a sync *downloads* is governed per-membership by `syncMode`: `all` (full bucket — the default, and what owners get on upgrade), `shared` (only your explicit ACL grants), or `custom` (an explicit prefix list). Set it with `hq sync mode <all|shared|custom>` and narrow an existing local tree with `hq sync narrow`. This is purely about local footprint — it does **not** change your *access*. Owners always sync as `all` regardless of the stored mode; admins stay grant-scoped for sync; `shared`/`custom` just stop a sync from materializing the whole vault locally. The scope is resolved per company in hq-cloud `src/sync/pull-scope.ts::resolvePullScope` (degrades to `all` on any error so a transient failure never prunes the tree). To reach a file you have access to but didn't download, use `hq files browse`/`cat`/`search`/`get` (see the `hq-files` skill) — no full sync required.
+
+- **Pins keep an on-demand `get` from being pruned.** `hq files get <path>` materializes a path and records it in `<hqRoot>/.hq/pins.json`; `resolvePullScope` unions a company's pins into its `shared`/`custom` pull scope, so a got-file survives subsequent scoped syncs instead of being deleted as an out-of-scope orphan.
+
+- **A single missing or locked path is `/hq-access`, not a full sync.** When one path is absent or returns a 403, run `/hq-access <path>` (or `hq access <path>`): it distinguishes never-created from not-yet-downloaded from access-denied, fetches and pins the file when you have access, repairs sync when the fetch fails, and asks the prefix owner for a grant when it does not.

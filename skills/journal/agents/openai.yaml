@@ -1,0 +1,3 @@
+interface:
+  display_name: "Journal"
+  short_description: "Write a structured session journal entry for later recovery."

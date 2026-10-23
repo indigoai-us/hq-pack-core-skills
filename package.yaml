@@ -1,0 +1,131 @@
+name: hq-pack-core-skills
+version: 1.0.0
+publisher: '@indigoai-us'
+access: public
+description: 'HQ core skills (/prd, /handoff, /checkpoint and the rest of the release-shipped set) as one required pack. hq-cli pins and installs it; each skill is linked under its unprefixed name at .claude/skills/<name>. The core-resident bootstrap skills in core-resident-skills.txt stay in hq-core.'
+license: MIT
+repository: https://github.com/indigoai-us/hq-pack-core-skills
+# Link contributes.skills into .claude/skills/<name> with no pack prefix.
+# Honored only for this first-party pack (hq-cloud reindex, US-006).
+surface: unprefixed
+requires:
+  hqCore: '>=16.0.0'
+  hqCli: '>=5.345.161'
+contributes:
+  # Exactly the directories under skills/, sorted with LC_ALL=C.
+  # scripts/check-contributes.sh fails on any difference.
+  skills:
+    - _shared
+    - accept
+    - adr
+    - architect
+    - ascii-graphic
+    - brainstorm
+    - calibration-report
+    - capacity
+    - checkpoint
+    - clean-worktree
+    - cleanup
+    - codebase-design
+    - commit-main
+    - conduct
+    - conduct-join
+    - convert-codex
+    - create-skill
+    - daily-brief
+    - decision-desk
+    - decision-queue
+    - deep-plan
+    - delegate
+    - deploy
+    - designate-team
+    - diagnose
+    - discover
+    - dm
+    - dm-bind
+    - document-release
+    - domain-modeling
+    - execute-task
+    - finish-estimate
+    - free-disk-space
+    - garden
+    - goals
+    - grill-me
+    - grilling
+    - handoff
+    - handoff-all
+    - handoff-and-archive
+    - harness-audit
+    - hq-access
+    - hq-bug
+    - hq-cost
+    - hq-files
+    - hq-integrations
+    - hq-library
+    - hq-logout
+    - hq-secrets
+    - hq-share
+    - hq-sync
+    - hq-whoami
+    - humanize
+    - idea
+    - import-claude
+    - import-context
+    - investigate
+    - job
+    - join-meeting
+    - journal
+    - knowledge-pulse
+    - land
+    - land-batch
+    - learn
+    - meeting-notes
+    - new-agent
+    - new-hire
+    - newcompany
+    - newworker
+    - onboard
+    - ontology
+    - orchestrate
+    - out-of-scope
+    - outpost-host
+    - overnight
+    - personal-interview
+    - pin
+    - prd
+    - project-summary
+    - promote
+    - publish-docs
+    - quality-gate
+    - registry
+    - resolve-conflicts
+    - resume-all
+    - resumework
+    - retro
+    - review
+    - review-plan
+    - run
+    - run-pipeline
+    - run-project
+    - schedule
+    - search
+    - ship
+    - signals
+    - startwork
+    - storyboard
+    - strategize
+    - super-conductor
+    - sync-registry
+    - tdd
+    - team-access
+    - to-tickets
+    - track-estimate
+    - tutorial
+    - wayfinder
+    - work-broadcast
+    - worktree
+  workers: []
+  knowledge: []
+  hooks: []
+  policies: []
+  commands: []

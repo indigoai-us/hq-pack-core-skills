@@ -1,0 +1,3 @@
+interface:
+  display_name: "Handoff"
+  short_description: "Save working state for a follow-up session."

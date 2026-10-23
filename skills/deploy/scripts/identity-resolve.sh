@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# identity-resolve.sh — resolve a Cognito token (JWT) for hq-deploy.
+# Inlined replacement for the former Identity sub-agent: same JSON contract,
+# zero Task-tool overhead, deterministic.
+#
+# Output (one JSON line on stdout):
+#   {"status":"ok","jwt":"...","id_token":"...","identity":"person|machine","expires_at":<epoch-ms>,"source":"cache|refresh|login|machine_mint"}
+#
+# `id_token` is the HQ Pro / grantee-validation token (X-HQ-Pro-Authorization).
+# Callers MUST take it from here rather than re-reading the token file with a
+# raw `jq`: only this script applies the expiry skew and the refresh path, so a
+# raw read silently reintroduces the mid-deploy 401 this script exists to stop.
+#   {"status":"login_required","reason":"<short>"}
+#   {"status":"missing_dependency","dep":"jq|node","install":"<per-OS guidance>"}
+#
+# JSON field extract: jq preferred, then node via core/scripts/hook-lib.sh
+# (hq_json_get). Do not reimplement a second JSON engine here.
+# expiresAt in the token file is epoch-MILLIS (e.g. 1777490340903), NOT ISO.
+# Bash access to ~/.hq/cognito-tokens.json is sanctioned: the harness
+# Read-tool deny rule is what forces this structured-access path.
+# Pass --force-refresh after an authenticated request returns 401 so a
+# future-dated but rejected cached token cannot be returned again.
+
+set -u
+
+FORCE_REFRESH=0
+case "${1:-}" in
+  "") ;;
+  --force-refresh) FORCE_REFRESH=1 ;;
+  *) printf 'usage: %s [--force-refresh]\n' "$0" >&2; exit 64 ;;
+esac
+[ "$#" -le 1 ] || { printf 'usage: %s [--force-refresh]\n' "$0" >&2; exit 64; }
+
+# bash 3.2-safe SCRIPT_DIR (no external dirname)
+_src="${BASH_SOURCE[0]}"
+_dir="${_src%/*}"
+[ "$_dir" = "$_src" ] && _dir="."
+SCRIPT_DIR="$(cd "$_dir" && pwd)"
+
+# Walk up from this script to find HQ root (contains core/scripts/hook-lib.sh).
+_find_hook_lib() {
+  local d="$SCRIPT_DIR"
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -f "$d/core/scripts/hook-lib.sh" ]; then
+      printf '%s\n' "$d/core/scripts/hook-lib.sh"
+      return 0
+    fi
+    case "$d" in
+      */*) d="${d%/*}" ;;
+      *) break ;;
+    esac
+  done
+  return 1
+}
+
+TOKEN_FILE="$HOME/.hq/cognito-tokens.json"
+LEGACY_FILE="$HOME/.hq/auth/session.json"
+MACHINE_CREDS_FILE="${HQ_MACHINE_CREDS_FILE:-$HOME/.hq-agent/machine-creds.json}"
+# Keep this in lockstep with hq-cloud's machineTokenStateDir/
+# machineTokenCacheFile. Machine tokens must never be taken from the person's
+# ~/.hq cache: a shared box can legitimately have both identity types present.
+_mtsd() {
+  if [ -n "${HQ_MACHINE_TOKEN_STATE_DIR:-}" ]; then
+    printf '%s' "$HQ_MACHINE_TOKEN_STATE_DIR"
+  elif [ -n "${HQ_WORK_MESH_ROOT:-}" ]; then
+    printf '%s/daemon' "$HQ_WORK_MESH_ROOT"
+  else
+    printf '%s/.hq/work-mesh/daemon' "$HOME"
+  fi
+}
+MACHINE_TOKEN_FILE="$(_mtsd)/cognito-tokens.json"
+# Accepting a token with seconds of life left guarantees a mid-deploy 401.
+# Define this before machine mode too: both machine and person paths validate
+# the cached session after hq-auth-refresh returns.
+SKEW_MS=300000  # 5 min — must exceed worst-case deploy duration after this call
+DEPLOY_USER_KEY=${USER:-${USERNAME:-unknown}}
+DEPLOY_USER_KEY=${DEPLOY_USER_KEY//[^[:alnum:]_.-]/_}
+_DEPLOY_TMPDIR="${TMPDIR:-/tmp}"
+_DEPLOY_TMPDIR="${_DEPLOY_TMPDIR%/}"
+LOGIN_LOCK="$_DEPLOY_TMPDIR/hq-deploy-login-attempted-$DEPLOY_USER_KEY"
+# The one-shot login lock expires so a lock left by an earlier session cannot
+# block every later deploy. Minutes; non-numeric or zero falls back to 10.
+LOGIN_LOCK_TTL_MIN="${HQ_DEPLOY_LOGIN_LOCK_TTL_MIN:-10}"
+case "$LOGIN_LOCK_TTL_MIN" in ''|*[!0-9]*|0) LOGIN_LOCK_TTL_MIN=10 ;; esac
+
+emit() { printf '%s\n' "$1"; exit 0; }
+err()  { printf '%s\n' "{\"status\":\"login_required\",\"reason\":\"$1\"}"; exit 0; }
+
+# Prefer jq; fall back to node. A PATH entry is not proof that node runs:
+# Windows app-execution aliases and stale shims may resolve but fail every call.
+# Probe execution before allowing hook-lib to select node as its JSON engine.
+JQ_OK=0
+NODE_OK=0
+command -v jq >/dev/null 2>&1 && JQ_OK=1
+if command -v node >/dev/null 2>&1 \
+  && node -e 'process.exit(0)' >/dev/null 2>&1; then
+  NODE_OK=1
+fi
+if [ "$JQ_OK" -eq 0 ] && [ "$NODE_OK" -eq 0 ]; then
+  emit '{"status":"missing_dependency","dep":"jq|node","install":"Install jq or Node.js so /deploy can read the Cognito token file. Windows: winget install jqlang.jq  (or choco install jq / scoop install jq); also winget install OpenJS.NodeJS. macOS: brew install jq node. Linux: sudo apt-get install jq nodejs  (or sudo dnf install jq nodejs)."}'
+fi
+
+# Epoch-ms: prefer node (works on PATH-isolated Windows Git Bash), but validate
+# its output. A broken node shim must not turn NOW_MS into 0 and make every
+# positive expiresAt look current. Fall back to date; fail visibly if neither
+# clock source works.
+NOW_MS=""
+if [ "$NODE_OK" -eq 1 ]; then
+  NOW_MS=$(node -e 'process.stdout.write(String(Date.now()))' 2>/dev/null || true)
+fi
+case "$NOW_MS" in
+  ''|0|*[!0-9]*)
+    NOW_S=""
+    if command -v date >/dev/null 2>&1; then
+      NOW_S=$(date +%s 2>/dev/null || true)
+    fi
+    case "$NOW_S" in
+      ''|0|*[!0-9]*)
+        emit '{"status":"missing_dependency","dep":"node|date","install":"Install or repair Node.js, or provide a working date command, so /deploy can validate token expiry."}'
+        ;;
+      *) NOW_MS=$((NOW_S * 1000)) ;;
+    esac
+    ;;
+esac
+
+HOOK_LIB="$(_find_hook_lib || true)"
+if [ -z "$HOOK_LIB" ] || [ ! -f "$HOOK_LIB" ]; then
+  err "hook_lib_missing"
+fi
+# shellcheck disable=SC1090
+. "$HOOK_LIB"
+
+# Read a top-level string/number field from a token JSON file via hook-lib engine order.
+token_field() {
+  local file=$1 key=$2
+  hq_json_get "$key" < "$file"
+}
+
+emit_person_ok() {
+  local jwt=$1 id_token=$2 expires_at=$3 source=$4
+  emit "{\"status\":\"ok\",\"jwt\":\"$jwt\",\"id_token\":\"$id_token\",\"identity\":\"person\",\"expires_at\":$expires_at,\"source\":\"$source\"}"
+}
+
+emit_machine_ok() {
+  local id_token=$1 expires_at=$2
+  # Agent identity claims exist only on Cognito's ID token. Use it for both
+  # fields so hq-deploy and vault membership resolution see the agt_ principal.
+  emit "{\"status\":\"ok\",\"jwt\":\"$id_token\",\"id_token\":\"$id_token\",\"identity\":\"machine\",\"expires_at\":$expires_at,\"source\":\"machine_mint\"}"
+}
+
+MINT_STDERR_FILE=""
+
+json_quote_stdin() {
+  if [ "$JQ_OK" -eq 1 ]; then
+    jq -Rs '.[0:200]'
+  elif [ "$NODE_OK" -eq 1 ]; then
+    node -e 'let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", c => s += c); process.stdin.on("end", () => process.stdout.write(JSON.stringify(s.slice(0, 200))));'
+  else
+    return 1
+  fi
+}
+
+machine_mint_failed() {
+  local mint_detail_line="" mint_detail_json="" line="" detail_lower=""
+  if [ -n "${MINT_STDERR_FILE:-}" ] && [ -f "$MINT_STDERR_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      mint_detail_line=$line
+    done < "$MINT_STDERR_FILE"
+  fi
+  mint_detail_line=${mint_detail_line%$'\r'}
+  # Do not echo diagnostics that name or resemble credentials, tokens, or env
+  # assignments. hq-auth-refresh owns the machine-creds file; this script never
+  # reads it. Other plain diagnostics are bounded and JSON-escaped below.
+  detail_lower=$(printf '%s' "$mint_detail_line" | tr '[:upper:]' '[:lower:]')
+  case "$detail_lower" in
+    *token*|*secret*|*password*|*credential*|*authorization*|*bearer*|*machine-creds*|*hq_machine*|*=*)
+      mint_detail_line="[redacted sensitive diagnostic]"
+      ;;
+  esac
+  if [[ "$mint_detail_line" =~ [A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,} ]]; then
+    mint_detail_line="[redacted sensitive diagnostic]"
+  fi
+  if ! mint_detail_json=$(printf '%s' "${mint_detail_line:0:200}" | json_quote_stdin 2>/dev/null); then
+    mint_detail_json='""'
+  fi
+  printf '{"status":"login_required","reason":"machine_mint_failed","detail":%s}\n' "$mint_detail_json"
+  exit 0
+}
+
+# Fleet agents authenticate non-interactively with machine credentials. Match
+# the CLI's signal: HQ_MACHINE_CREDS_FILE overrides the standard agent path.
+# Do not read or parse the credential file here; hq-auth-refresh owns that
+# validation and minting path. Crucially, a machine identity must never reach
+# the human browser-login branch below.
+#
+# An explicitly configured credentials path is itself a machine-mode signal,
+# even when the file cannot be read. A pre-existing machine cache is also a
+# signal, so a damaged credentials file cannot silently switch an agent to a
+# human browser sign-in on a shared box.
+#
+# The cache alone is not a signal when this process has no machine credentials
+# and a person session file exists (Shepherd 2367). Agent kits that pinned only
+# HQ_MACHINE_CREDS_FILE minted into the shared default cache, which left a
+# machine cache on the owner's laptop and forced their deploys into machine
+# mode.
+MACHINE_IDENTITY_EXPECTED=0
+if [ -n "${HQ_MACHINE_CREDS_FILE:-}" ] \
+  || [ -r "$HOME/.hq-agent/machine-creds.json" ]; then
+  MACHINE_IDENTITY_EXPECTED=1
+elif [ -e "$MACHINE_TOKEN_FILE" ] \
+  && [ ! -f "$TOKEN_FILE" ] && [ ! -f "$LEGACY_FILE" ]; then
+  MACHINE_IDENTITY_EXPECTED=1
+fi
+if [ "$MACHINE_IDENTITY_EXPECTED" -eq 1 ]; then
+  [ -r "$MACHINE_CREDS_FILE" ] || err "machine_mint_failed"
+  MACHINE_MIN_VALIDITY_SECONDS=$((SKEW_MS / 1000))
+  if [ "$FORCE_REFRESH" -eq 1 ]; then
+    # Machine tokens are normally one hour; one day forces a fresh mint after
+    # an API rejection, rather than letting hq-auth-refresh reuse that cache.
+    MACHINE_MIN_VALIDITY_SECONDS=86400
+  fi
+  MINT_STDERR_FILE=$(mktemp "$_DEPLOY_TMPDIR/hq-auth-refresh.XXXXXX" 2>/dev/null || true)
+  [ -n "$MINT_STDERR_FILE" ] || machine_mint_failed
+  trap 'if [ -n "${MINT_STDERR_FILE:-}" ] && [ -f "$MINT_STDERR_FILE" ]; then rm -f "$MINT_STDERR_FILE"; fi' EXIT
+  run_machine_mint() {
+    MINT_OK=1
+    if command -v hq-auth-refresh >/dev/null 2>&1; then
+      HQ_AUTH_MIN_VALIDITY_SECONDS="$1" \
+        hq-auth-refresh >/dev/null 2>"$MINT_STDERR_FILE" || MINT_OK=0
+    elif command -v npx >/dev/null 2>&1; then
+      HQ_AUTH_MIN_VALIDITY_SECONDS="$1" \
+        npx -y --package=@indigoai-us/hq-cli hq-auth-refresh \
+          >/dev/null 2>"$MINT_STDERR_FILE" || MINT_OK=0
+    else
+      err "machine_mint_unavailable"
+    fi
+  }
+  # hq-auth-refresh writes the canonical cache after either a healthy machine
+  # cache hit or a fresh USER_PASSWORD_AUTH mint. Never accept a stale file if
+  # the mint command itself failed.
+  try_machine_cache() {
+    [ "$MINT_OK" -eq 1 ] && [ -f "$MACHINE_TOKEN_FILE" ] || return 1
+    IDT=$(token_field "$MACHINE_TOKEN_FILE" "idToken")
+    EXP=$(token_field "$MACHINE_TOKEN_FILE" "expiresAt")
+    [ -n "$EXP" ] || EXP=0
+    if [ -n "$IDT" ] && [ "$EXP" -gt "$((NOW_MS + SKEW_MS))" ] 2>/dev/null; then
+      emit_machine_ok "$IDT" "$EXP"
+    fi
+    return 1
+  }
+  run_machine_mint "$MACHINE_MIN_VALIDITY_SECONDS"
+  try_machine_cache || true
+  # A cached machine token the daemon left behind can be stale, rejected, or
+  # fail its in-place refresh (feedback_1eaa57d7). Before failing, retry once
+  # with a one-day validity floor so hq-auth-refresh skips that cache and
+  # mints a fresh token from the machine credentials.
+  if [ "$MACHINE_MIN_VALIDITY_SECONDS" -lt 86400 ]; then
+    run_machine_mint 86400
+    try_machine_cache || true
+  fi
+  machine_mint_failed
+fi
+
+# 1. Find token file
+if [ -f "$TOKEN_FILE" ]; then
+  TF="$TOKEN_FILE"
+elif [ -f "$LEGACY_FILE" ]; then
+  TF="$LEGACY_FILE"
+else
+  TF=""
+fi
+
+# 2. Try cache hit
+# A bare "not yet expired" check is not enough: the caller uses this token for
+# the WHOLE deploy (build, tarball, S3 upload, then the access-policy call),
+# which routinely takes minutes. Accepting a token with seconds of life left
+# guarantees a mid-deploy 401 once per token hour. Treat anything inside the
+# skew window as stale so the refresh path below runs first.
+REJECTED_AT=""
+if [ -n "$TF" ]; then
+  AT=$(token_field "$TF" "accessToken")
+  IDT=$(token_field "$TF" "idToken")
+  EXP=$(token_field "$TF" "expiresAt")
+  REJECTED_AT="$AT"
+  [ -n "$EXP" ] || EXP=0
+  if [ "$FORCE_REFRESH" -eq 0 ] && [ -n "$AT" ] \
+    && [ "$EXP" -gt "$((NOW_MS + SKEW_MS))" ] 2>/dev/null; then
+    emit_person_ok "$AT" "$IDT" "$EXP" "cache"
+  fi
+fi
+
+# 3. Refresh path (token exists but stale, or the API rejected it)
+if [ -n "$TF" ]; then
+  RT=$(token_field "$TF" "refreshToken")
+  if [ -n "$RT" ]; then
+    if command -v hq-auth-refresh >/dev/null 2>&1; then
+      hq-auth-refresh >/dev/null 2>&1 || true
+    elif command -v npx >/dev/null 2>&1; then
+      npx -y --package=@indigoai-us/hq-cli hq-auth-refresh >/dev/null 2>&1 || true
+    fi
+    if [ -f "$TOKEN_FILE" ]; then
+      AT=$(token_field "$TOKEN_FILE" "accessToken")
+      IDT=$(token_field "$TOKEN_FILE" "idToken")
+      EXP=$(token_field "$TOKEN_FILE" "expiresAt")
+      [ -n "$EXP" ] || EXP=0
+      TOKEN_CHANGED=1
+      if [ "$FORCE_REFRESH" -eq 1 ] && [ "$AT" = "$REJECTED_AT" ]; then
+        TOKEN_CHANGED=0
+      fi
+      # Same skew applies: if hq-auth-refresh silently no-opped, the on-disk
+      # token is unchanged and still inside the window. Fall through to login
+      # rather than hand the caller a token that dies mid-deploy.
+      # A forced refresh additionally requires a different access token: expiry
+      # alone cannot rehabilitate the token the API just rejected.
+      if [ "$TOKEN_CHANGED" -eq 1 ] && [ -n "$AT" ] \
+        && [ "$EXP" -gt "$((NOW_MS + SKEW_MS))" ] 2>/dev/null; then
+        emit_person_ok "$AT" "$IDT" "$EXP" "refresh"
+      fi
+    fi
+  fi
+fi
+
+# 4. Login path (no token, or refresh failed) — one-shot per session
+# A lock older than the TTL is stale: fall through and take it again.
+if [ -e "$LOGIN_LOCK" ] \
+  && [ -z "$(find "$LOGIN_LOCK" -prune -mmin +"$LOGIN_LOCK_TTL_MIN" 2>/dev/null)" ]; then
+  err "login_already_attempted"
+fi
+if ! command -v npx >/dev/null 2>&1 && ! command -v hq >/dev/null 2>&1; then
+  err "no_token_no_npx"
+fi
+
+touch "$LOGIN_LOCK"
+printf 'Opening HQ sign-in in your browser — one moment...\n' >&2
+
+if command -v hq >/dev/null 2>&1; then
+  hq auth login >/dev/null 2>&1 &
+else
+  npx -y --package=@indigoai-us/hq-cli hq auth login >/dev/null 2>&1 &
+fi
+LOGIN_PID=$!
+# Detach the timer from stdout so a caller capturing it does not wait 180s.
+( sleep 180 && kill "$LOGIN_PID" 2>/dev/null ) >/dev/null 2>&1 &
+KILLER_PID=$!
+wait "$LOGIN_PID" 2>/dev/null
+kill "$KILLER_PID" 2>/dev/null
+wait "$KILLER_PID" 2>/dev/null
+
+if [ -f "$TOKEN_FILE" ]; then
+  AT=$(token_field "$TOKEN_FILE" "accessToken")
+  IDT=$(token_field "$TOKEN_FILE" "idToken")
+  EXP=$(token_field "$TOKEN_FILE" "expiresAt")
+  [ -n "$EXP" ] || EXP=0
+  if [ -n "$AT" ]; then
+    emit_person_ok "$AT" "$IDT" "$EXP" "login"
+  fi
+fi
+err "login_attempt_failed"

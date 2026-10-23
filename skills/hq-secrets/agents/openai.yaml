@@ -1,0 +1,3 @@
+interface:
+  display_name: "hq secrets"
+  short_description: "Run HQ CLI secrets safely without exposing values."

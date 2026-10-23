@@ -1,0 +1,3 @@
+interface:
+  display_name: "discover"
+  short_description: "Inspect a repo and add structured knowledge to HQ."

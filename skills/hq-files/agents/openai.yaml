@@ -1,0 +1,3 @@
+interface:
+  display_name: "hq files"
+  short_description: "Manage HQ vault sharing, access grants, and revocations."

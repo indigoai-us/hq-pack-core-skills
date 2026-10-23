@@ -1,0 +1,3 @@
+interface:
+  display_name: "meeting-notes"
+  short_description: "Read HQ meeting notes, recaps, transcripts, and source records."

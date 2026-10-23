@@ -1,0 +1,36 @@
+{
+  "name": "@indigoai-us/hq-pack-core-skills",
+  "version": "1.0.0",
+  "description": "HQ core skills as one required pack, pinned and installed by hq-cli.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/indigoai-us/hq-pack-core-skills.git"
+  },
+  "homepage": "https://github.com/indigoai-us/hq-pack-core-skills#readme",
+  "bugs": {
+    "url": "https://github.com/indigoai-us/hq-pack-core-skills/issues"
+  },
+  "files": [
+    "package.yaml",
+    "skills/",
+    "SOURCE.md",
+    "commands.json",
+    "core-resident-skills.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18",
+    "hq-core": ">=16.0.0",
+    "hq-cli": ">=5.345.161"
+  },
+  "scripts": {
+    "check": "bash scripts/check.sh",
+    "test": "bash tests/run.sh",
+    "commands": "bash scripts/vendor/skill-inventory.sh --json --out commands.json"
+  }
+}

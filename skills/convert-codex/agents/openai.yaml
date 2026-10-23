@@ -1,0 +1,3 @@
+interface:
+  display_name: "Convert Codex"
+  short_description: "Add Codex support to a Claude-first HQ root."

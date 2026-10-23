@@ -1,0 +1,30 @@
+# One Linux job on pull requests, skipped for drafts
+# (indigo-ci-local-first-minimal-github-actions). Run `npm run check` and
+# `npm test` locally before marking a PR ready. No push, schedule, macOS or
+# Windows jobs.
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # No dependency install: the checks are bash plus the runner's node.
+      - name: npm run check
+        run: npm run check
+      - name: npm test
+        run: npm test
