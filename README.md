@@ -43,8 +43,9 @@ They are listed in `core-resident-skills.txt` and must not be added here.
 | `commands.json` | Command palette data generated from `skills/` |
 | `core-resident-skills.txt` | Skills that stay in hq-core |
 | `SOURCE.md` | Source commit of the initial copy and how to re-verify it |
-| `scripts/` | CI checks; `scripts/vendor/` holds scripts copied from hq-core-staging |
-| `tests/run.sh` | Fixture tests for the checks |
+| `scripts/` | CI checks and release scripts; `scripts/vendor/` holds scripts copied from hq-core-staging |
+| `tests/run.sh` | Fixture tests for the checks; runs `tests/*.test.mjs` for the release pipeline |
+| `RELEASING.md` | How a version is tagged, published to npm, listed in the marketplace and verified |
 
 ## Changing a skill
 
@@ -62,7 +63,7 @@ They are listed in `core-resident-skills.txt` and must not be added here.
 
 A release is a separate step (version bump by PR, then a tag). A version
 bump or a change to the `requires` ranges edits both `package.yaml` and
-`package.json`.
+`package.json`. See `RELEASING.md`.
 
 ## Checks
 

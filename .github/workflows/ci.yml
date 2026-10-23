@@ -23,7 +23,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # No dependency install: the checks are bash plus the runner's node.
+      # No dependency install for the pack: the checks are bash plus the
+      # runner's node. The install tests drive the oldest supported hq-cli,
+      # installed from npm into a temp prefix.
+      - name: Install hq-cli for the install tests
+        run: bash scripts/install-test-hq-cli.sh "$RUNNER_TEMP/hq-cli" >> "$GITHUB_ENV"
       - name: npm run check
         run: npm run check
       - name: npm test

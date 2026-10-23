@@ -353,6 +353,23 @@ check_ci() {
 }
 if check_ci; then ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check"; else not_ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check" "see .github/workflows/ci.yml"; fi
 
+# --- release pipeline (node:test) ------------------------------------------------
+#
+# tests/*.test.mjs cover release.yml, the tag guard, the tarball builder, the
+# npm-content check, verify-release, and installs through hq-cli's real
+# marketplace transport. The hq-cli tests need HQ_CLI_DIR (see
+# scripts/install-test-hq-cli.sh); without it they fail and say so.
+
+node_tests=("$REPO"/tests/*.test.mjs)
+capture node --test "${node_tests[@]}"
+summary="$(grep -E '^# (tests|pass|fail) ' <<<"$OUT" | tr '\n' ' ')"
+if [[ "$RC" -eq 0 ]]; then
+  ok "node --test tests/*.test.mjs (${#node_tests[@]} files; ${summary% })"
+else
+  not_ok "node --test tests/*.test.mjs (${#node_tests[@]} files; ${summary% })" \
+    "$(grep -E '^[[:space:]]*not ok|^[[:space:]]+error:' <<<"$OUT" | head -80)"
+fi
+
 echo
 echo "$pass passed, ${#failures[@]} failed"
 if [[ "${#failures[@]}" -gt 0 ]]; then
