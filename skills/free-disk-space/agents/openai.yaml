@@ -1,0 +1,3 @@
+interface:
+  display_name: "Free Disk Space"
+  short_description: "Dry-run disk reclaim. Deletes only with --apply."

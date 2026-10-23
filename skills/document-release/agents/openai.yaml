@@ -1,0 +1,3 @@
+interface:
+  display_name: "Document Release"
+  short_description: "Update repo docs after a release or project change."

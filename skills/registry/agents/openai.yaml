@@ -1,0 +1,3 @@
+interface:
+  display_name: "Registry"
+  short_description: "Update a company's shared resource inventory."

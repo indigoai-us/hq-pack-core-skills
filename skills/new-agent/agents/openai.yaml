@@ -1,0 +1,3 @@
+interface:
+  display_name: "new-agent"
+  short_description: "Provision an HQ agent and verify its identity and capability."

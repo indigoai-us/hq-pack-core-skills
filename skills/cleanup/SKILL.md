@@ -1,0 +1,563 @@
+---
+name: cleanup
+description: Audit and clean HQ structures, indexes, and stale content.
+allowed-tools: Task, Read, Glob, Grep, Bash, Write, Edit, AskUserQuestion
+---
+
+# /cleanup - HQ Maintenance
+
+Audit HQ for policy violations, migrate outdated structures, and fix inconsistencies.
+
+**User's input:** $ARGUMENTS
+
+## Modes
+
+- **No args / --audit**: Report issues only (default, safe)
+- **--migrate**: Convert old formats to new (prd.json → README.md)
+- **--fix**: Auto-fix simple issues (git cleanup, archive stale files)
+- **--reindex**: Regenerate ALL INDEX.md files from disk (full rebuild)
+- **--consolidate-learnings**: Deduplicate, merge, and reorganize learned rules across all target files
+- **--consolidate-insights**: Deduplicate, merge, and flag stale insights in `workspace/insights/` and `companies/*/knowledge/insights/`
+
+## The Job
+
+1. Run audit checks
+2. Report findings
+3. If --migrate or --fix: propose changes, ask confirmation, execute
+
+---
+
+## Audit Checks
+
+### 1. Project Structure
+
+**Policy**: Personal/HQ projects live in `personal/projects/`; company projects live in `companies/{co}/projects/`. Each project should have a `README.md`.
+
+```bash
+# Find projects with only prd.json (no README)
+for dir in personal/projects/*/ companies/*/projects/*/; do
+  if [[ -f "${dir}prd.json" && ! -f "${dir}README.md" ]]; then
+    echo "MIGRATE: $dir has prd.json but no README.md"
+  fi
+done
+
+# Find projects outside approved project folders
+find . -path './.git' -prune -o -name "prd.json" -print 2>/dev/null | grep -vE '^\./(personal/projects|companies/[^/]+/projects)/'
+```
+
+**Violations**:
+- prd.json without README.md → needs migration
+- prd.json outside `personal/projects/` or `companies/{co}/projects/` → needs relocation
+
+### 2. Worker Registry
+
+**Policy**: Each worker directory has a `worker.yaml` with required fields (`worker.id`, `worker.type`, `worker.description`). `core/workers/registry.yaml` is auto-generated from these — no need to check for "unindexed" workers, but DO check that every worker dir has a valid `worker.yaml`.
+
+```bash
+# Find worker dirs missing worker.yaml or required fields
+for dir in core/workers/public/*/ companies/*/workers/*/; do
+  [[ -d "$dir" ]] || continue
+  yaml="${dir}worker.yaml"
+  if [[ ! -f "$yaml" ]]; then
+    echo "MISSING worker.yaml: $dir"; continue
+  fi
+  for field in id type description; do
+    val=$(yq -r ".worker.${field} // \"\"" "$yaml" 2>/dev/null)
+    [[ -z "$val" ]] && echo "MISSING worker.${field}: $yaml"
+  done
+done
+
+# Force a fresh registry regen
+bash core/scripts/generate-workers-registry.sh
+```
+
+### 3. Deprecated Directories
+
+**Policy**: No apps/ directory (use `personal/projects/`, `companies/{co}/projects/`, or `core/workers/`)
+
+```bash
+# Check if apps/ still exists
+if [[ -d "apps" ]]; then
+  echo "DEPRECATED: apps/ directory still exists"
+  ls apps/
+fi
+```
+
+### 4. Git Status
+
+**Policy**: Clean working tree, no orphaned deletions
+
+```bash
+git status --short
+```
+
+**Issues**:
+- Deleted files not committed
+- Untracked new files (should commit or ignore)
+- Modified submodules
+
+**Note:** Company knowledge paths must be plain real directories with no embedded Git metadata. Personal knowledge directories may contain embedded Git when independent version history is needed. A legacy symlink into a separate repository is a migration violation; keep detecting it so cleanup can report it, but never create or preserve it as a supported layout. Package-managed links into `core/packages/*/knowledge/` are not repositories and remain valid.
+
+### 4b. Personal and Core Knowledge Repo Status
+
+**Policy**: Embedded Git repositories under personal and core knowledge should be clean (committed). Company knowledge is a plain directory synced through its company vault and is not scanned for Git state.
+
+```bash
+   bash -c '
+   shopt -s nullglob
+   for knowledge_path in core/knowledge/public/* core/knowledge/private/* personal/knowledge/* companies/*/knowledge; do
+     if [ -L "$knowledge_path" ]; then
+       case "$knowledge_path" in
+         companies/*/knowledge)
+           echo "INVALID: $knowledge_path is a symlink; company knowledge must be a plain directory synced through the company vault"
+           continue
+           ;;
+       esac
+       target=$(cd "$knowledge_path" 2>/dev/null && pwd -P) || continue
+       case "$target" in
+         "$(pwd -P)"/core/packages/*) continue ;;  # package-managed mount — the only valid knowledge link
+       esac
+       repo_dir=$(cd "$knowledge_path" && git rev-parse --show-toplevel 2>/dev/null) || repo_dir=""
+       hq_repo=$(git rev-parse --show-toplevel 2>/dev/null) || hq_repo=""
+       if [ -n "$repo_dir" ] && [ "$repo_dir" != "$hq_repo" ]; then
+         echo "INVALID: $knowledge_path links to separate repo $repo_dir; migrate to a real directory (hq reindex)"
+     else
+       echo "NONSTANDARD: $knowledge_path is a symlink to $target; knowledge must be a real directory, while core/packages mounts may use links"
+     fi
+     continue
+   fi
+   case "$knowledge_path" in
+     companies/*/knowledge) continue ;;  # company knowledge is never a Git repository
+   esac
+   [ -d "$knowledge_path/.git" ] || continue
+     repo_dir=$(cd "$knowledge_path" && git rev-parse --show-toplevel 2>/dev/null) || continue
+     dirty=$(cd "$repo_dir" && git status --porcelain)
+     [ -z "$dirty" ] && continue
+     echo "DIRTY: $knowledge_path → $repo_dir"
+   done
+   '
+```
+
+**With --fix**: Auto-commit dirty personal/core knowledge repos only:
+```bash
+(cd "$repo_dir" && git add -A && git commit -m "chore: cleanup commit")
+```
+
+### 5. Stale Threads & Checkpoints
+
+**Policy**: Archive manual threads/checkpoints older than 30 days. Purge auto-checkpoints older than 14 days.
+
+```bash
+# Auto-checkpoints older than 14 days (purge, not archive)
+find workspace/threads -name "T-*-auto-*.json" -mtime +14 2>/dev/null
+
+# Stale manual threads (new format, 30 days)
+find workspace/threads -name "*.json" -not -name "*-auto-*" -mtime +30 2>/dev/null
+
+# Stale checkpoints (legacy format)
+find workspace/checkpoints -name "*.json" -mtime +30 2>/dev/null
+```
+
+### 6. Worker State Machine
+
+**Policy**: Workers should have state_machine section (Loom pattern)
+
+```bash
+# Find workers without state_machine
+for f in core/workers/*/worker.yaml core/workers/public/dev-team/*/worker.yaml; do
+  if [[ -f "$f" ]] && ! grep -q "state_machine:" "$f"; then
+    echo "MISSING: $f lacks state_machine section"
+  fi
+done
+```
+
+### 7. Orphaned Skills
+
+**Policy**: Skills only in `.claude/skills/<name>/SKILL.md` format (commands tree is gone)
+
+```bash
+# Find old SKILL.md format
+find . -name "SKILL.md" -not -path "./repos/*"
+```
+
+### 8. Stale INDEX.md Files
+
+**Policy**: INDEX.md files should exist and match directory contents. See `core/knowledge/public/hq-core/index-md-spec.md` for spec.
+
+**Expected locations:**
+- `personal/projects/INDEX.md`
+- `companies/{product}/knowledge/INDEX.md`
+- `companies/{company}/knowledge/INDEX.md`
+- `core/knowledge/public/INDEX.md`
+- `core/workers/public/INDEX.md`
+- `core/workers/private/INDEX.md`
+- `workspace/orchestrator/INDEX.md`
+- `workspace/reports/INDEX.md`
+- `workspace/social-drafts/INDEX.md`
+
+For each:
+1. Check if INDEX.md exists → flag MISSING if not
+2. Count entries in INDEX table vs actual directory contents → flag STALE if mismatch
+
+**With --reindex or --fix**: Regenerate all INDEX.md files from disk per spec.
+
+### 9. Manifest Completeness
+
+**Policy**: Every company in `manifest.yaml` should have non-null values for all fields.
+
+```bash
+# Check for null values in manifest
+grep -n "null" companies/manifest.yaml
+```
+
+**Manifest field**: `knowledge` is a path to the company's plain knowledge directory (usually `companies/{company}/knowledge/`); it does not identify a Git repository. A `null` value means no company knowledge directory is configured.
+
+**Violations**: Company with `knowledge: null`, empty settings when settings dir has files, etc.
+
+**With --fix**: For each company with `knowledge: null`:
+1. Create the plain directory: `mkdir -p companies/{company}/knowledge/`; add an initial README if needed.
+2. Update manifest.yaml: replace `null` with `companies/{company}/knowledge/`.
+
+Do **not** symlink `companies/{company}/knowledge` into `repos/` — sync uploads
+symlink markers instead of document contents.
+
+### 10. qmd Collection Completeness
+
+**Policy**: Every company with a knowledge directory should have a qmd collection. HQ itself should have 4 sub-collections: `hq-infra`, `hq-workers`, `hq-knowledge`, `hq-projects` (not a monolithic `hq`).
+
+```bash
+# Check companies with knowledge but empty qmd_collections
+grep -B10 "qmd_collections: \[\]" companies/manifest.yaml | grep "^[a-z]"
+# Check HQ sub-collections exist
+for c in hq-infra hq-workers hq-knowledge hq-projects; do
+  qmd ls "$c" 2>/dev/null | head -1 | grep -q . || echo "MISSING: $c"
+done
+```
+
+**With --fix**: Create qmd collection for each missing company. If an `hq-*` sub-collection is missing, recreate just that one with its targeted `qmd collection add` — the exact operations `core/scripts/setup.sh` performs, without running the full installer (which can replace the globally installed qmd, rewrite the PATH snapshot in `.claude/settings.json`, and prompt to install content packs):
+
+```bash
+qmd collection add "$REPO_ROOT/.claude"  --name hq-infra     --mask "**/*.{md,yaml,yml,json,sh}"
+qmd collection add "$REPO_ROOT/workers"  --name hq-workers   --mask "**/*.{md,yaml,yml,json}"
+qmd collection add "$REPO_ROOT/knowledge" --name hq-knowledge --mask "**/*.{md,yaml,yml}"
+qmd collection add "$REPO_ROOT/projects" --name hq-projects  --mask "**/*.{md,json}"
+```
+
+---
+
+## Migration: prd.json → README.md
+
+For each project with only `prd.json`:
+
+1. Read prd.json
+2. Extract fields:
+   - `name` → title
+   - `description` → overview
+   - `metadata.goal` → Goal line
+   - `metadata.successCriteria` → Success line
+   - `userStories[]` → User Stories section
+3. Generate README.md
+4. Keep prd.json as backup (rename to `prd.json.bak`)
+
+**Template**:
+```markdown
+# {name}
+
+**Goal:** {metadata.goal}
+**Success:** {metadata.successCriteria}
+
+## Overview
+{description}
+
+## User Stories
+
+### US-001: {story.title}
+**Description:** {story.description}
+
+**Acceptance Criteria:**
+{story.acceptanceCriteria as checklist}
+
+## Non-Goals
+{if present}
+
+## Technical Considerations
+{if present}
+```
+
+---
+
+## Fix Actions
+
+### Git Cleanup
+```bash
+# Stage deleted files
+git add -u
+
+# Commit cleanup
+git commit -m "chore: cleanup orphaned files"
+```
+
+### Purge Stale Auto-Checkpoints
+```bash
+# Delete auto-checkpoints older than 14 days (no archive — they're lightweight)
+find workspace/threads -name "T-*-auto-*.json" -mtime +14 -delete 2>/dev/null
+echo "Purged $(find workspace/threads -name "T-*-auto-*.json" -mtime +14 2>/dev/null | wc -l) auto-checkpoints"
+```
+
+### Archive Stale Threads & Checkpoints
+```bash
+mkdir -p archives/threads archives/checkpoints
+find workspace/threads -name "*.json" -not -name "*-auto-*" -mtime +30 -exec mv {} archives/threads/ \;
+find workspace/checkpoints -name "*.json" -mtime +30 -exec mv {} archives/checkpoints/ \;
+```
+
+### Relocate Misplaced Projects
+```bash
+# Move apps/{name}/prd.json to personal/projects/{name}/
+mkdir -p personal/projects/{name}
+mv apps/{name}/prd.json personal/projects/{name}/
+```
+
+### Regenerate INDEX.md Files (--reindex)
+
+Delegate to the umbrella regenerator — same script the handoff pipeline uses.
+
+```bash
+hq core rebuild-index all
+```
+
+Covers all 9 INDEX classes: threads, orchestrator, companies, projects, company-knowledge, public-knowledge, workers, reports, social-drafts. Per-class scripts live at `core/scripts/rebuild-{class}-index.sh` — each is pure bash + jq (zero Claude context), writes its `Generated: {TS}` header per `core/knowledge/public/hq-core/index-md-spec.md`, and logs `wrote {path} (N entries)` to stderr. Umbrella emits JSON array of regenerated paths on stdout.
+
+---
+
+## Output Format
+
+### Audit Report
+```
+HQ Cleanup Audit
+================
+
+✓ Worker registry: 15 workers indexed
+✗ Project structure: 8 issues
+  - personal/projects/customer-cube: prd.json without README.md
+  - personal/projects/deel-analytics: prd.json without README.md
+  ...
+✗ Deprecated directories: apps/ still exists (4 items)
+✗ Git status: 3 uncommitted changes
+✓ Checkpoints: all recent
+✗ INDEX.md: 2 stale, 1 missing
+  - personal/projects/INDEX.md: 30 entries vs 33 actual (stale)
+  - workspace/reports/INDEX.md: missing
+
+Summary: 14 issues found
+Run `/cleanup --migrate` to convert prd.json files
+Run `/cleanup --fix` to clean git and archive stale files
+Run `/cleanup --reindex` to regenerate all INDEX.md files
+Run `/cleanup --consolidate-learnings` to dedup and reorganize learned rules
+Run `/cleanup --consolidate-insights` to dedup and flag stale insights
+```
+
+### After Migration
+```
+Migrated 8 projects to README.md format:
+- personal/projects/customer-cube/README.md (created)
+- personal/projects/deel-analytics/README.md (created)
+...
+
+Original prd.json files renamed to prd.json.bak
+Run `/cleanup --fix` to commit changes
+```
+
+---
+
+## Consolidate Learnings (--consolidate-learnings)
+
+Dedup, merge, and reorganize learned rules across all target files.
+
+### Step 1: Collect all rules
+
+Scan these locations and extract every rule:
+
+| Location | How to find |
+|----------|-------------|
+| `.claude/CLAUDE.md` `## Learned Rules` | Read section, parse `- **{name}**:` entries |
+| Worker yamls `## Learnings` | `grep -rl "## Learnings" core/workers/` → read each |
+| Skill mds `## Rules` | `grep -rl "## Rules" .claude/skills/` → read each |
+| Learning event log | `ls workspace/learnings/*.json` → read rules[] from each |
+
+Build a master list: `{rule_text, source_file, section, date_added}`.
+
+### Step 2: Cross-file dedup
+
+For each rule in the master list:
+```bash
+qmd vsearch "{rule_text}" --json -n 10
+```
+
+Flag:
+- **Exact duplicates** (similarity > 0.85 across different files): keep the most specific (worker > skill > global), remove the other
+- **Near-duplicates** (0.6–0.85): merge into one rule with combined context, remove the weaker copy
+- **Contradictions**: flag for user review (don't auto-resolve)
+
+### Step 3: Deprecate stale rules
+
+For each rule, check if its references still exist:
+- Rule mentions a worker → does `core/workers/public/{id}/worker.yaml` or `companies/{co}/workers/{id}/worker.yaml` exist?
+- Rule mentions a slash command → does `.claude/skills/{name}/SKILL.md` exist?
+- Rule mentions a tool/API → is it still in use? (best effort)
+
+Flag stale rules for user review. Don't auto-delete — present as candidates.
+
+### Step 4: Reorganize scope
+
+If a scoped rule (worker/command) has been superseded by a broader global rule covering the same behavior, remove the scoped copy (the global rule covers it).
+
+If a global rule only applies to one worker/command, demote it to the scoped file and remove from CLAUDE.md (frees global cap space).
+
+### Step 5: Apply changes
+
+For each proposed change (remove/merge/demote/promote), apply to target files using Edit tool.
+
+### Step 6: Reindex
+
+```bash
+qmd update && qmd embed
+```
+
+### Step 7: Report
+
+```
+Learning Consolidation
+======================
+Rules scanned: {total}
+  - CLAUDE.md: {n}
+  - Workers: {n} across {m} files
+  - Commands: {n} across {m} files
+
+Actions taken:
+  ✓ Removed {n} duplicates
+  ✓ Merged {n} near-duplicates
+  ✓ Demoted {n} global → scoped
+  ✓ Promoted {n} scoped → global
+  ⚠ {n} stale rules flagged (review below)
+  ⚠ {n} contradictions flagged (review below)
+
+Stale rules:
+  - {rule} in {file} — references deleted worker {id}
+  ...
+
+Contradictions:
+  - {rule_a} vs {rule_b} — {explanation}
+  ...
+```
+
+---
+
+## Consolidate Insights (--consolidate-insights)
+
+Deduplicate, merge, and flag stale insights across all insight directories.
+
+### Step 1: Collect all insights
+
+Scan these locations:
+
+| Location | How to find |
+|----------|-------------|
+| `workspace/insights/global/` | `ls workspace/insights/global/*.md` |
+| `workspace/insights/tools/` | `ls workspace/insights/tools/*.md` |
+| `workspace/insights/concepts/` | `ls workspace/insights/concepts/*.md` |
+| `companies/*/knowledge/insights/` | `ls companies/*/knowledge/insights/*.md 2>/dev/null` |
+
+Build master list: `{title, slug, scope, confidence, created, file_path}` from YAML frontmatter.
+
+### Step 2: Cross-file dedup
+
+For each insight:
+```bash
+qmd vsearch "{insight title + first sentence}" --json -n 10
+```
+
+Flag:
+- **Exact duplicates** (similarity > 0.85): keep the more detailed version, remove the other
+- **Near-duplicates** (0.6–0.85): merge into one insight with combined context, remove the weaker copy
+- **Cross-scope overlap**: company insight that duplicates a global insight → keep company version (more specific)
+
+### Step 3: Flag stale insights
+
+Insights older than 90 days with `confidence: medium` are stale candidates:
+```bash
+# Find medium-confidence insights older than 90 days
+for f in workspace/insights/**/*.md companies/*/knowledge/insights/*.md; do
+  [ -f "$f" ] || continue
+  confidence=$(grep "^confidence:" "$f" | awk '{print $(2)}')
+  created=$(grep "^created:" "$f" | awk '{print $(2)}')
+  [ "$confidence" = "medium" ] && echo "STALE CANDIDATE: $f (created: $created)"
+done
+```
+
+Present stale candidates for user review. Don't auto-delete.
+
+### Step 4: Apply changes
+
+For each proposed change (remove/merge), apply using Edit tool. Update `updated` date on merged insights.
+
+### Step 5: Reindex
+
+```bash
+qmd update && qmd embed
+```
+
+### Step 6: Report
+
+```
+Insight Consolidation
+=====================
+Insights scanned: {total}
+  - Global: {n}
+  - Tools: {n}
+  - Concepts: {n}
+  - Company-scoped: {n} across {m} companies
+
+Actions taken:
+  ✓ Removed {n} duplicates
+  ✓ Merged {n} near-duplicates
+  ⚠ {n} stale insights flagged (review below)
+
+Stale candidates:
+  - {title} in {file} — medium confidence, created {date}
+  ...
+```
+
+---
+
+## Rules
+
+- **--audit is safe**: Never modifies files, only reports
+- **Always ask before destructive actions**: deletions, moves
+- **Backup before migration**: rename, don't delete
+- **Commit after changes**: keep git clean
+
+---
+
+## Current HQ Policies
+
+Reference for what we're enforcing:
+
+| Area | Policy |
+|------|--------|
+| Projects | Live in `personal/projects/{name}/` or `companies/{co}/projects/{name}/` with `README.md` |
+| PRD format | Markdown README.md (not prd.json) |
+| Workers | Each has `worker.yaml` with `worker.id/type/description`; registry auto-generates |
+| Worker FSM | `state_machine:` section in worker.yaml (Loom pattern) |
+| Apps | Deprecated - migrate to `personal/projects/`, `companies/{co}/projects/`, or `core/workers/` |
+| Skills | `.claude/skills/<name>/SKILL.md` format |
+| Threads | Primary session persistence (`workspace/threads/`) |
+| Auto-checkpoints | Lightweight, purge after 14 days (`T-*-auto-*.json`) |
+| Checkpoints | Legacy format, archive after 30 days |
+| Metrics | Append to `workspace/metrics/metrics.jsonl` |
+| Git | Clean working tree |
+| Knowledge directories | Company paths are plain synced directories; personal/core embedded repos may be committed; links to separate repos are flagged for migration |
+| INDEX.md | Exist at 10 key dirs, match contents (see spec) |
+| Manifest | All companies have non-null knowledge, settings, repos |
+| qmd | All companies with knowledge have a qmd collection |
+| Learnings | No cross-file duplicates, stale rules flagged, scoped > global |

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Resolve Conflicts"
+  short_description: "Resolve local and cloud file conflicts interactively."

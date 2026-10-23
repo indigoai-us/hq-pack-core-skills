@@ -1,0 +1,11 @@
+# Core-resident bootstrap skills (open question 3 of the skills-cli-pack PRD).
+# These stay in hq-core .claude/skills so a host with a broken CLI or no pack
+# installed can still recover. None of them may appear under skills/ in this
+# pack. One name per line; lines starting with # and blank lines are ignored.
+# hq-core core/core.yaml `coreResidentSkills` carries the same list.
+hq-checkup
+hq-heal
+hq-login
+recover-session
+setup
+update-hq

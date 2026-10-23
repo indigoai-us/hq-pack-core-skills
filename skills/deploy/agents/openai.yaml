@@ -1,0 +1,3 @@
+interface:
+  display_name: "deploy"
+  short_description: "Deploy generated artifacts and apps through hq-deploy."

@@ -1,0 +1,63 @@
+---
+name: signals
+description: Read HQ-native company signals such as decisions, actions, risks, commitments, and wins.
+allowed-tools: Bash, Read, Grep, Glob
+---
+
+# /signals — Read HQ-native signals (decisions, action items, wins, risks…)
+
+Signals are an **HQ-native, per-company store** of meeting/comms intelligence — discrete, cited items extracted from meeting notes and other sources. This is the generic, multi-company reader. A company may also ship its own namespaced interface (e.g. `{co}:signals`, `{co}:action-items`) over the *same* store; this skill serves **all** companies.
+
+**Canonical store:** `companies/{co}/signals/{type}/{sha256}.md` (company-wide) and `companies/{co}/signals/@{audienceKey}/{type}/{sha256}.md` (visible only to the people privy to the source — spec `core/knowledge/public/hq-core/ontology-local-spec.md`), daily index `companies/{co}/signals/_index/{YYYY-MM-DD}.json`.
+**Mechanism/schema detail (read once if needed):** `core/knowledge/public/hq-core/native-knowledge-stores.md`.
+
+## Signal types (8)
+
+| Type | Use it for |
+|---|---|
+| `action_item` | tasks/to-dos assigned to an owner |
+| `commitment` | explicit promises a participant made |
+| `decision` | decisions reached |
+| `risk` | blockers, concerns, threats raised |
+| `question` | open questions, unresolved |
+| `key_point` | notable discussion points |
+| `participant_contribution` | what a specific person contributed |
+| `summary` | per-meeting summaries |
+
+"Wins / accomplishments" → read `decision` + `key_point` (and `summary`). "Follow-ups" → `action_item` + `commitment`.
+
+Each signal `.md` has frontmatter: `canonical_content` (one-line normalized statement), `citations[]` (`location` timestamp, `source_ref`, verbatim `text`), `entity_refs[]` (`person/…`, `project/…`), `source_ref`, `type`, `signal_id`.
+
+## Hard rule
+
+HQ-native first. Read the signals store to answer these asks. **Never** default to scraping email or a third-party notetaker. If the store is empty/unactivated, steer the user to activation (below) — don't fabricate or guess.
+
+## Resolution (run every time)
+
+1. **Resolve company.** `bash core/scripts/hq-session.sh get company_slug`; else infer from cwd/manifest; else ask.
+2. **Load preference (company over global).** Read `companies/{co}/settings/knowledge/preferences.yaml` then `personal/settings/knowledge-preferences.yaml`. Built-in default: `signals_enabled: true`. If a company has `signals_enabled: false`, tell the user it's disabled and offer to enable it (flip the flag) rather than reading.
+3. **Classify the ask** via the type table (and any `aliases.signals` in the preference file): action items → `action_item`, "what did we decide" → `decision`, wins → `decision`+`key_point`, risks → `risk`, open questions → `question`, "{person} committed" → `commitment` filtered by `entity_refs` person.
+
+## Reading
+
+- **Recency:** use the latest `_index/{date}.json` files (newest dates first) to find recently-written signals; or list newest files under both `companies/{co}/signals/{type}/` and `companies/{co}/signals/@*/{type}/`. Skip `_candidates/` (not yet gardened). Mark each scoped item as scoped when presenting it, and never repeat a scoped item into a shared surface (a channel post, a company doc).
+- **Filter:** by type (dir), by owner/person (`entity_refs` contains `person/{slug}`), by project (`project/{slug}`), by date.
+- **Present:** group by type; show `canonical_content` per item with its owner/source; cite the meeting (`source_ref`) and timestamp from `citations[]` when useful. For mutable action-item tracking with status lifecycle, note that a company may ship a dedicated namespaced tracker (e.g. `{co}:action-items`); this skill is read-only.
+
+## Empty / not-activated branch
+
+If `companies/{co}/signals/` is empty or absent, signals haven't been extracted for this company yet. Surface the turnkey ladder (full version in the knowledge doc + USER-GUIDE):
+
+1. `/designate-team {co}` to make the company cloud-backed.
+2. Capture meetings with the HQ meeting bot (`/meeting-notes` covers this) → notes ingest.
+3. Signals are extracted from ingested notes into `companies/{co}/signals/` automatically once provisioned.
+4. Note: billing is live. On the legacy plans, inviting the HQ meeting bot needs the company on HQ Workforce (a Starter company gets "HQ Workforce plan required to invite a meeting bot" with an upgrade link; the owner upgrades with `hq billing upgrade --company {co}` or on the console Billing page). On the usage card (new signups from 2026-10-16), relay what HQ returns. Signals extraction runs on HQ cloud over the notes that arrive. Plan details: `core/knowledge/public/hq-core/plans-and-pricing.md`.
+
+## Output
+
+Quiet, plain, grouped summary of the signals the user asked for — decisions, action items, wins, risks, etc. — with light citations.
+
+## See also
+
+- `/meeting-notes` — the source meeting notes
+- `/ontology` — entities behind the signals
