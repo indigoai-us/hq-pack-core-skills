@@ -88,9 +88,14 @@ and is not part of CI.
 
 ## Review gate
 
-<!-- PLACEHOLDER: filled by US-003 (extend the /hq-core-review merge gate to this repo). -->
+Pull requests here go through the same review gate as hq-core-staging.
+`/hq-core-review` (PII, denylist and domain scans) must pass for the PR's
+current head commit before the PR is merged. A new push needs a fresh review.
+Merging also needs one approving review from the core approvers, given in the
+core-pr-reviews channel.
 
-To be filled by US-003.
+The maintainers' tooling blocks a merge until the review has passed for the
+head commit.
 
 ## License
 
