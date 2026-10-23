@@ -31,6 +31,8 @@
   "scripts": {
     "check": "bash scripts/check.sh",
     "test": "bash tests/run.sh",
-    "commands": "bash scripts/vendor/skill-inventory.sh --json --out commands.json"
+    "commands": "bash scripts/vendor/skill-inventory.sh --json --out commands.json",
+    "build:tarball": "bash scripts/build-tarball.sh",
+    "verify-release": "node scripts/verify-release.mjs"
   }
 }

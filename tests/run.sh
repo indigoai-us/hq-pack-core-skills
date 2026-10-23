@@ -353,6 +353,55 @@ check_ci() {
 }
 if check_ci; then ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check"; else not_ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check" "see .github/workflows/ci.yml"; fi
 
+# --- import-skill.sh (US-015) -----------------------------------------------------
+
+# shellcheck source=tests/import-skill.test.sh
+source "$REPO/tests/import-skill.test.sh"
+
+# --- RELEASING.md rollback runbook (US-013) ------------------------------------------
+
+# Each needle is a fixed string the runbook must contain.
+rollback_needles=(
+  '## Rollback'
+  'npm deprecate @indigoai-us/hq-pack-core-skills@<bad> "<reason>"'
+  'POST https://hqapi.hq.computer/v1/moderation/listings/{id}/yank'
+  'Publish the revert as the next patch'
+  'src/lib/core-skills-pack/pin.ts'
+  'older than 24 hours'
+  'hq packs update hq-pack-core-skills'
+  'hq packs hold hq-pack-core-skills@<good>'
+  'hq packs hold --clear'
+  'test/integration/core-skills-rollback.test.ts'
+)
+rollback_missing=""
+rollback_section="$(awk '/^## Rollback$/ { on = 1 } on' "$REPO/RELEASING.md")"
+for needle in "${rollback_needles[@]}"; do
+  grep -qF -- "$needle" <<<"$rollback_section" || rollback_missing+="$needle"$'\n'
+done
+grep -qF 'To be written' <<<"$rollback_section" && rollback_missing+="(placeholder text still present)"$'\n'
+if [[ -z "$rollback_missing" ]]; then
+  ok "RELEASING.md rollback runbook: deprecate, yank, revert patch, pin narrowing, time to recover, hold"
+else
+  not_ok "RELEASING.md rollback runbook: deprecate, yank, revert patch, pin narrowing, time to recover, hold" "missing: $rollback_missing"
+fi
+
+# --- release pipeline (node:test) ------------------------------------------------
+#
+# tests/*.test.mjs cover release.yml, the tag guard, the tarball builder, the
+# npm-content check, verify-release, and installs through hq-cli's real
+# marketplace transport. The hq-cli tests need HQ_CLI_DIR (see
+# scripts/install-test-hq-cli.sh); without it they fail and say so.
+
+node_tests=("$REPO"/tests/*.test.mjs)
+capture node --test "${node_tests[@]}"
+summary="$(grep -E '^# (tests|pass|fail) ' <<<"$OUT" | tr '\n' ' ')"
+if [[ "$RC" -eq 0 ]]; then
+  ok "node --test tests/*.test.mjs (${#node_tests[@]} files; ${summary% })"
+else
+  not_ok "node --test tests/*.test.mjs (${#node_tests[@]} files; ${summary% })" \
+    "$(grep -E '^[[:space:]]*not ok|^[[:space:]]+error:' <<<"$OUT" | head -80)"
+fi
+
 echo
 echo "$pass passed, ${#failures[@]} failed"
 if [[ "${#failures[@]}" -gt 0 ]]; then
