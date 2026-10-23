@@ -46,8 +46,12 @@ They are listed in `core-resident-skills.txt` and must not be added here.
 | `scripts/` | CI checks and release scripts; `scripts/vendor/` holds scripts copied from hq-core-staging |
 | `tests/run.sh` | Fixture tests for the checks; runs `tests/*.test.mjs` for the release pipeline |
 | `RELEASING.md` | How a version is tagged, published to npm, listed in the marketplace and verified |
+| `CONTRIBUTING.md` | How to promote a company or personal skill into the pack (`scripts/import-skill.sh`) |
 
 ## Changing a skill
+
+To promote a company or personal skill into the pack, use
+`scripts/import-skill.sh` and follow [CONTRIBUTING.md](CONTRIBUTING.md).
 
 1. Branch, edit `skills/<name>/`, and keep the frontmatter `name` equal to the
    directory name. Do not add a `skill_uid` field.

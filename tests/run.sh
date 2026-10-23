@@ -353,6 +353,11 @@ check_ci() {
 }
 if check_ci; then ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check"; else not_ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check" "see .github/workflows/ci.yml"; fi
 
+# --- import-skill.sh (US-015) -----------------------------------------------------
+
+# shellcheck source=tests/import-skill.test.sh
+source "$REPO/tests/import-skill.test.sh"
+
 # --- RELEASING.md rollback runbook (US-013) ------------------------------------------
 
 # Each needle is a fixed string the runbook must contain.
