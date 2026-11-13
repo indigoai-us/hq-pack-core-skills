@@ -31,7 +31,7 @@ hq billing usage --card --json
 - The rate you show for a meter is its `displayText` when it has one, word
   for word (the call meters are priced per 100 calls). Only a meter without
   `displayText` is shown as `unitUsd` per `unit`, and a non-zero `unitUsd`
-  keeps its digits, so a rate never reads "$0.00".
+  keeps its digits, so a rate is never shown as zero dollars.
 - `card.includedUsd`: usage included free each month. `card.trial`: days and
   usage cap. `card.free`: what is never billed (deploys, DMs, background AI).
 - The usage report in Step 1 carries the same rates per meter
