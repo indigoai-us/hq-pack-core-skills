@@ -727,7 +727,7 @@
       "skillUid": null,
       "group": "other",
       "source": "skills/hq-cost/SKILL.md",
-      "hash": "sha256:ee9cc7327191c9f24f786f4ea65798917450e2cfb9c4bc6f0685c705a7ceaaee",
+      "hash": "sha256:1c497b3b4da73ed2ac9fd34fb054273de2fb120e956087c0f68d88bb1be895eb",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -761,7 +761,7 @@
       "skillUid": null,
       "group": "sync",
       "source": "skills/hq-integrations/SKILL.md",
-      "hash": "sha256:a151ef2bf2b52a90fc99c7f19cd3e535a15319a49d35857cf63ab05dad813436",
+      "hash": "sha256:64e5af819f2231768363535b5f1d9287b388177f5af3d18e64490bed897755b4",
       "duplicates": {
         "exact": [],
         "drifted": [],

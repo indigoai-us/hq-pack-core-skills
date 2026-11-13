@@ -24,8 +24,14 @@ through the CLI:
 hq billing usage --card --json
 ```
 
-- `card.meters[]`: `id`, `label`, `unit`, `unitUsd`, and `waivedInTrial` (the
-  vault meter is waived during the trial).
+- `card.meters[]`: `id`, `label`, `unit`, `unitUsd`, `waivedInTrial` (the
+  vault meter is waived during the trial), and on the call meters
+  (`hq-mcp-call`, `integration-call`) `displayPer`, `displayUsd` and
+  `displayText`.
+- The rate you show for a meter is its `displayText` when it has one, word
+  for word (the call meters are priced per 100 calls). Only a meter without
+  `displayText` is shown as `unitUsd` per `unit`, and a non-zero `unitUsd`
+  keeps its digits, so a rate never reads "$0.00".
 - `card.includedUsd`: usage included free each month. `card.trial`: days and
   usage cap. `card.free`: what is never billed (deploys, DMs, background AI).
 - The usage report in Step 1 carries the same rates per meter
@@ -82,7 +88,8 @@ The JSON is a `UsageReport`:
 
 - `scope`: `kind` (`company` or `person`), `companySlug`, `role`.
 - `bill`: `meters[]` (per meter: `key`, `displayName`, `unit`, `unitUsd`,
-  `value`, `state`, `monthToDateUsd`, `projectedUsd`), `monthToDateUsd`,
+  `displayText` on the call meters, `value`, `state`, `monthToDateUsd`,
+  `projectedUsd`), `monthToDateUsd`,
   `allowanceUsd`, `allowanceLeftUsd`, `projectedUsd`, `projectedBillUsd`,
   `incomplete`, `daysElapsed`, `daysInMonth`.
 - `storage` (when scanned): current vs old-version bytes, `canDelete`.
@@ -94,6 +101,8 @@ The JSON is a `UsageReport`:
 ## Step 2 — Show it
 
 A short table: meter, amount, rate, projected cost, all from `bill.meters[]`.
+The rate column is the meter's `displayText` when present, else `unitUsd`
+per `unit`.
 A meter whose `state` is `not-available` shows "not counted here yet", never
 zero. Then:
 
