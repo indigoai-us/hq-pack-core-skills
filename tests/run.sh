@@ -353,6 +353,16 @@ check_ci() {
 }
 if check_ci; then ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check"; else not_ok "ci.yml: one ubuntu job on non-draft pull requests running npm run check" "see .github/workflows/ci.yml"; fi
 
+# --- call prices come from the card's displayText ---------------------------
+# HQ MCP and gateway calls are priced per 100 calls. Skills quote the meter's
+# displayText from the live card and never carry a per-call price of their own.
+price_skills=("$REPO/skills/hq-integrations/SKILL.md" "$REPO/skills/hq-cost/SKILL.md")
+stale_price="$(grep -nE '5 cents|\$0\.05 per (call|gateway|HQ MCP)|\$0\.001 (per|a) call' "${price_skills[@]}" || true)"
+if [[ -z "$stale_price" ]]; then ok "call-price skills carry no per-call price"; else not_ok "call-price skills carry no per-call price" "$stale_price"; fi
+missing_display=""
+for f in "${price_skills[@]}"; do grep -qF 'displayText' "$f" || missing_display+="$f "; done
+if [[ -z "$missing_display" ]]; then ok "call-price skills quote the meter's displayText"; else not_ok "call-price skills quote the meter's displayText" "missing in: $missing_display"; fi
+
 echo
 echo "$pass passed, ${#failures[@]} failed"
 if [[ "${#failures[@]}" -gt 0 ]]; then
