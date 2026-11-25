@@ -1,7 +1,7 @@
 ---
 name: conduct
-description: "Orchestrator mode: coordinate only; small tasks go to subagents, worker areas to standing hq lanes. Triggers: /conduct, run everything in the background."
-allowed-tools: Agent, SendMessage, Bash, Bash(hq lanes:*), Bash(bash core/scripts/lanes-workers.sh:*), Bash(bash core/scripts/conduct-standing.sh:*), Bash(bash core/scripts/hq-session.sh:*), Read, Grep, Glob, AskUserQuestion, mcp__visualize__read_me, mcp__visualize__show_widget
+description: "Orchestrator mode: coordinate only; small tasks go to subagents, worker areas to standing hq runners. Triggers: /conduct, run everything in the background."
+allowed-tools: Agent, SendMessage, Bash, Bash(hq runners:*), Bash(bash core/scripts/lanes-workers.sh:*), Bash(bash core/scripts/conduct-standing.sh:*), Bash(bash core/scripts/hq-session.sh:*), Read, Grep, Glob, AskUserQuestion, mcp__visualize__read_me, mcp__visualize__show_widget
 argument-hint: "[--workers <roles>] [--engine e] [--model m] [--effort f] | [engine] [task description] | adopt [session] | tell <child> <message> | status | off"
 ---
 
@@ -10,7 +10,7 @@ argument-hint: "[--workers <roles>] [--engine e] [--model m] [--effort f] | [eng
 The invoking session is the senior. It coordinates and never does project
 work itself. `/conduct` hands each task to a worker and returns so the senior
 session stays available. A worker is a background `Agent` subagent in this
-session, or an `hq lanes` worker lane (a separate process). Both runners get
+session, or an `hq runners` worker lane (a separate process). Both runners get
 the same brief, the same done criteria, and the same verification step.
 
 ### Routing
@@ -22,7 +22,7 @@ Owner decision, 2026-10-22 ("Workers stay open"). This replaces the
 - Standing worker lane: any task that matches an HQ worker in the registry or
   a `--workers` role, and any ongoing area of work in that worker's scope.
   Open it early, keep it open with
-  `hq lanes keep-alive <lane> --on --standing`, and send later tasks for the
+  `hq runners keep-alive <lane> --on --standing`, and send later tasks for the
   same worker and company to the same lane instead of opening another.
 - Background subagent: a small, bounded task with no matching worker (a
   lookup, a check, a draft, one skill run).
@@ -44,7 +44,7 @@ Owner decision, 2026-10-22: `mixed` is the default runner.
   this session. It starts at once, uses this session's own Claude login, and
   is never refused for lane capacity. It shares this session's usage and stops
   if this session ends.
-- `lane`: the brief runs through `hq lanes create`. Use it when the owner asks
+- `lane`: the brief runs through `hq runners create`. Use it when the owner asks
   for lanes, when the work must outlive this session (overnight work, lead
   lanes that resume on their own, `--loop`, `--remote-control`, `--outpost`,
   or a non-Claude engine), or when the host has no `Agent` tool (Codex).
@@ -63,17 +63,17 @@ See "Runner" in `dispatch.md`.
   interrupt, so a later create resumes the worker's thread), stop each other
   lane this session launched after confirmation, clear the session engine
   pin, and close an open session link with
-  `hq lanes link close --link <link-id> --session-id <session-id>`.
-- `status` → report this session's lanes from `hq lanes list --json`, its
+  `hq runners link close --link <link-id> --session-id <session-id>`.
+- `status` → report this session's lanes from `hq runners list --json`, its
   standing lanes from `conduct-standing.sh list`, and its running subagents;
   do not launch work.
 - `--runner mixed|subagent|lane` → pin the runner for this session with
   `bash core/scripts/hq-session.sh set conduct_runner <runner>`. The remaining
   words are the task.
 - `adopt` → use `.claude/skills/conduct/adopt.md` for linked-session behavior.
-- `tell {child} {message}` → send through `hq lanes link send` with the same
+- `tell {child} {message}` → send through `hq runners link send` with the same
   link, child, session, and text flags:
-  `hq lanes link send --link <link-id> --child <child> --session-id <session-id> --text <message>`.
+  `hq runners link send --link <link-id> --child <child> --session-id <session-id> --text <message>`.
 - `--workers {roles}` with optional `--engine`, `--model`, `--effort` → pin
   the selected provider/model/effort once for this session using
   `bash core/scripts/lanes-workers.sh setup`, then open one standing lane per
@@ -125,7 +125,7 @@ status, or `/conduct off`.
   a task with no company stays with the owner until one is named.
 - Before `/handoff` or the session ending, run
   `bash core/scripts/conduct-standing.sh close` and say which lanes closed.
-- `hq lanes create` owns lane admission and capacity. On a capacity refusal,
+- `hq runners create` owns lane admission and capacity. On a capacity refusal,
   run the same brief as a subagent instead of queuing it; do not pick a lane
   account by hand or rebuild a pool around the refusal.
 - Lanes never spend paid Claude extra usage unless the owner pins

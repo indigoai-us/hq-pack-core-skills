@@ -1,7 +1,7 @@
 ---
 name: overnight
 description: Overnight team-comms mode inside a running /super-conductor session. On the conductor's heartbeat (at the away interval) it reads the HQ DM inbox and the active company's DM channels, answers information requests from HQ knowledge, routes work requests to the conducted child that owns them, queues anything only the owner can decide, checks that every teammate who asked for something got an answer or a route, and logs it all to the link's overnight report. Use when the user says "/overnight", "watch the team overnight", "handle team DMs while I sleep", "overnight mode", or "triage the inbox until morning".
-allowed-tools: Bash(hq lanes link:*), Bash(bash core/scripts/hq-session.sh:*), Bash(hq dm:*), Bash(hq monitor:*), Bash(hq monitor start --persistent --json --target "session:claude:$CLAUDE_CODE_SESSION_ID" --description "super-conductor heartbeat <link>" -- bash core/scripts/super-conductor-heartbeat.sh:*), Bash(hq channels:*), Bash(qmd:*), Bash(cat:*), Bash(tail:*), Bash(ls:*), Bash(date:*), Bash(python3:*), Read, Write, Edit, AskUserQuestion, ScheduleWakeup
+allowed-tools: Bash(hq runners link:*), Bash(bash core/scripts/hq-session.sh:*), Bash(hq dm:*), Bash(hq monitor:*), Bash(hq monitor start --persistent --json --target "session:claude:$CLAUDE_CODE_SESSION_ID" --description "super-conductor heartbeat <link>" -- bash core/scripts/super-conductor-heartbeat.sh:*), Bash(hq channels:*), Bash(qmd:*), Bash(cat:*), Bash(tail:*), Bash(ls:*), Bash(date:*), Bash(python3:*), Read, Write, Edit, AskUserQuestion, ScheduleWakeup
 argument-hint: "[off | status | <company>]"
 ---
 
@@ -34,7 +34,7 @@ logic lives in `.claude/skills/super-conductor/SKILL.md`.
 
 ## Step 2: Resolve the link and the company
 
-Run `hq lanes link list` and read `.link`. If it is `null`, stop and tell the
+Run `hq runners link list` and read `.link`. If it is `null`, stop and tell the
 owner to run `/super-conductor` first. Do not search link storage for a link.
 
 Resolve the company:
@@ -96,7 +96,7 @@ Classify every unread item from a teammate into exactly one bucket.
 | Bucket | Test | Action |
 |---|---|---|
 | (a) Information request | HQ can answer it from `qmd query -c <co> "<question>"`, company knowledge, policies, or the link's child reports | Answer in the same thread. Flat and factual, compact bullets, no secrets, no file dumps. Cite the knowledge source by name in the reply. |
-| (b) Work request owned by a child | The ask matches a conducted child's title or company in `.children` from `hq lanes link list` | Send the instruction to that child with `hq lanes link send --child <name> --text "<ask, who asked, where>"`. Reply once to the requester naming the session that owns it and that the owner reviews before anything merges, deploys, or publishes. |
+| (b) Work request owned by a child | The ask matches a conducted child's title or company in `.children` from `hq runners link list` | Send the instruction to that child with `hq runners link send --child <name> --text "<ask, who asked, where>"`. Reply once to the requester naming the session that owns it and that the owner reviews before anything merges, deploys, or publishes. |
 | (c) Owner-only | Access, grants, secrets, money, hiring, external sends, merges, deploys, publishes, deletes, anything irreversible, or anything about a different company | Do not act. If nobody has answered the thread, reply once that the owner sees it in the morning. Add it to `## Waiting on the owner`. |
 | (d) Bot or agent status post | Posted by a local bot, fleet agent, or scheduled job | Read it for signals (failures, blocked lanes, errors). No reply. Log a signal only if something is wrong. |
 
@@ -108,7 +108,7 @@ Reply shape, every time: one short line of what was done or will happen,
 then at most three bullets. Say who is replying (the owner's conductor
 session) when the owner is away.
 
-A successful `hq lanes link send` returns JSON with `queued: true` and the
+A successful `hq runners link send` returns JSON with `queued: true` and the
 number of children reached. It is an instruction that outranks the child's
 brief. Keep it to the ask, the requester, the channel, and the standing holds.
 Never forward a message body that contains a credential.
@@ -226,4 +226,4 @@ answered, routed, and queued. Say nothing when it was a noop.
   link, the children, and the collision pass
 - `/decision-queue` — how the owner clears `## Waiting on the owner`
 - `/dm` — the manual DM and channel verbs this skill automates
-- `hq lanes link` — the mailbox used to route work to children
+- `hq runners link` — the mailbox used to route work to children
