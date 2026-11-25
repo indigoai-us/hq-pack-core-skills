@@ -131,7 +131,7 @@ expect_fail "engines hq-cli differs from requires.hqCli: fails" \
 expect_fail "engines hq-cli mismatch fails check.sh on manifest-sync" "FAILED: manifest-sync" bash "$SCRIPTS/check.sh" "$root"
 
 root="$(make_fixture)"
-replace_line "$root/package.yaml" "  hqCli: '>=5.345.161'" "  hqCli: '>=5.400.0'"
+replace_line "$root/package.yaml" "  hqCli: '>=5.345.210'" "  hqCli: '>=5.400.0'"
 expect_fail "requires.hqCli raised without package.json engines: fails" \
   'package.yaml requires.hqCli is ">=5.400.0"' node "$SCRIPTS/check-manifest-sync.mjs" "$root"
 
