@@ -85,6 +85,7 @@ expect_pass "clean tree: check-frontmatter passes" bash "$SCRIPTS/check-frontmat
 expect_pass "clean tree: company-bind lint passes" bash "$SCRIPTS/vendor/lint-skill-company-bind.sh" "$root/skills"
 expect_pass "clean tree: commands.json is current" bash "$SCRIPTS/vendor/skill-inventory.sh" --root "$root" --check
 expect_pass "repo tree: check.sh passes" bash "$SCRIPTS/check.sh"
+expect_pass "clean tree: check-no-lanes-alias passes" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
 
 # --- package.json / package.yaml sync ---------------------------------------------
 
@@ -314,6 +315,25 @@ if node -e 'const d=require(process.argv[1]); const e=d.skills.find(s=>s.invoke=
 else
   not_ok "commands.json lists a new skill unprefixed with scope core and skips _shared" "$(head -c 400 "$root/commands.json")"
 fi
+
+# --- no lanes alias ---------------------------------------------------------
+
+root="$(make_fixture)"
+expect_pass "no lanes alias: untouched fixture passes" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+
+root="$(make_fixture)"
+listed_skill "$root" foo 'name: foo
+description: Fixture skill.' 'Run `hq lanes list` before starting.'
+expect_fail "skill containing literal hq lanes fails check-no-lanes-alias" \
+  "skills/foo/SKILL.md:6:" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+expect_fail "skill containing literal hq lanes fails check.sh on no-lanes-alias" \
+  "FAILED: no-lanes-alias" bash "$SCRIPTS/check.sh" "$root"
+if grep -q "FAILED: no-lanes-alias$" <<<"$OUT"; then ok "skill containing literal hq lanes: no other check fails"; else not_ok "skill containing literal hq lanes: no other check fails" "$OUT"; fi
+
+root="$(make_fixture)"
+insert_after "$root/commands.json" '      "name": "prd",' '      "note": "hq lanes",'
+expect_fail "commands.json containing literal hq lanes fails check-no-lanes-alias" \
+  "commands.json:" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
 
 # --- manifests and CI ---------------------------------------------------------------
 

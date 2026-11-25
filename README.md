@@ -81,10 +81,13 @@ bump or a change to the `requires` ranges edits both `package.yaml` and
   company binds the session before it reads a company path.
 - `scripts/vendor/skill-inventory.sh --check`: the committed `commands.json`
   equals a fresh render.
+- `scripts/check-no-lanes-alias.sh`: no file under `skills/` or
+  `commands.json` contains the literal `hq lanes` alias.
 
 `scripts/verify-source.sh <hq-core-staging checkout>` re-checks that
-`skills/` matches the source commit in `SOURCE.md`. It needs a staging clone
-and is not part of CI.
+`skills/` matches the source commit in `SOURCE.md` after applying the
+recorded post-copy transforms. It needs a staging clone and is not part of
+CI.
 
 ## Review gate
 
