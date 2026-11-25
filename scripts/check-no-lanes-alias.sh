@@ -3,7 +3,7 @@
 # contains the deprecated literal `hq lanes` alias.
 #
 # Usage: check-no-lanes-alias.sh [pack-root]   (default: this script's repo)
-# Exit 0 clean · 1 alias found · 2 bad usage.
+# Exit 0 clean · 1 alias found · 2 bad usage or a file could not be read.
 
 set -euo pipefail
 
@@ -18,7 +18,16 @@ if [[ -f "$COMMANDS_JSON" ]]; then
   targets+=("commands.json")
 fi
 
-matches="$(cd "$ROOT" && grep -rnFHa -- "hq lanes" "${targets[@]}" || true)"
+cd "$ROOT" || { echo "check-no-lanes-alias: cannot enter $ROOT" >&2; exit 2; }
+
+# grep exits 0 on a match, 1 on no match, and 2 or more when it could not read
+# something. Only exit 1 means the tree is clean.
+grep_rc=0
+matches="$(grep -rnFHa -- "hq lanes" "${targets[@]}")" || grep_rc=$?
+if [[ "$grep_rc" -gt 1 ]]; then
+  echo "check-no-lanes-alias: grep could not read every file (exit $grep_rc)" >&2
+  exit 2
+fi
 if [[ -n "$matches" ]]; then
   echo "check-no-lanes-alias: deprecated 'hq lanes' alias found (use 'hq runners'):" >&2
   printf '%s\n' "$matches" >&2

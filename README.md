@@ -86,8 +86,8 @@ bump or a change to the `requires` ranges edits both `package.yaml` and
 
 `scripts/verify-source.sh <hq-core-staging checkout>` re-checks that
 `skills/` matches the source commit in `SOURCE.md` after applying the
-recorded post-copy transforms. It needs a staging clone and is not part of
-CI.
+recorded post-copy transforms. It needs a staging clone and node, and is
+not part of CI.
 
 ## Review gate
 

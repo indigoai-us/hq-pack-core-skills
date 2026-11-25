@@ -48,6 +48,12 @@ the skills as a contributed item.
   Raised the `hq-cli` floor in `package.json` (`engines["hq-cli"]`) and
   `package.yaml` (`requires.hqCli`) from `>=5.345.161` to `>=5.345.210`,
   because `5.345.210` is the first `hq-cli` release with `hq runners`.
+  Raised the `hq-core` floor (`engines["hq-core"]`, `requires.hqCore`) from
+  `>=16.0.0` to `>=16.0.48`, because the scope hook in older cores treats the
+  `--text` value of `hq lanes message` and `hq lanes link report` as message
+  text but does not know the `hq runners` spellings, so it would check that
+  text as file paths. 16.0.48 is the first hq-core release whose hook lists
+  both spellings.
   `scripts/verify-source.sh` applies this same transform to the extracted
   staging tree before comparing against `skills/`.
 - **2026-11-15 — Call-meter `displayText` pricing (`920f1e7`):** updated
@@ -77,9 +83,10 @@ node -e 'const fs=require("node:fs"),p=require("node:path");function w(d){for(co
 diff -r "$tmp/.claude/skills" skills && echo "no difference"
 ```
 
-Empty `diff -r` output (and "no difference") means `skills/` matches the
-source commit minus the six core-resident skills after applying the recorded
-transforms.
+Expected result today: both the script and the hand recipe report exactly two
+differing files, `hq-cost/SKILL.md` and `hq-integrations/SKILL.md` (the
+2026-11-15 change above), and the script exits 1. Any other difference is
+unrecorded drift.
 
 ## Known gap in `npm pack`
 
@@ -95,4 +102,5 @@ must build a tarball that includes it (for example with `tar`, then
 
 From 1.0.0 on, this repo is the only copy of these skills. Changes land here
 by pull request, not in hq-core-staging. This file records where the content
-started; it is not updated for later edits.
+started. "Changes after the copy" lists the edits made here since then that
+`scripts/verify-source.sh` has to account for.

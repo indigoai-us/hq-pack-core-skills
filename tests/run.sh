@@ -335,6 +335,16 @@ insert_after "$root/commands.json" '      "name": "prd",' '      "note": "hq lan
 expect_fail "commands.json containing literal hq lanes fails check-no-lanes-alias" \
   "commands.json:" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
 
+# A file grep cannot read must not be reported as clean.
+root="$(make_fixture)"
+write_skill "$root" unreadable 'name: unreadable
+description: Fixture skill.' 'Run `hq lanes list` before starting.'
+chmod 000 "$root/skills/unreadable/SKILL.md"
+expect_fail "unreadable skill file fails check-no-lanes-alias instead of passing" \
+  "could not read every file" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+if [[ "$RC" == 2 ]]; then ok "unreadable skill file: exit code is 2"; else not_ok "unreadable skill file: exit code is 2" "rc=$RC"; fi
+chmod 644 "$root/skills/unreadable/SKILL.md"
+
 # --- manifests and CI ---------------------------------------------------------------
 
 check_manifest() {
