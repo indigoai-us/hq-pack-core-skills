@@ -9,8 +9,8 @@ repository: https://github.com/indigoai-us/hq-pack-core-skills
 # Honored only for this first-party pack (hq-cloud reindex, US-006).
 surface: unprefixed
 requires:
-  hqCore: '>=16.0.0'
-  hqCli: '>=5.345.161'
+  hqCore: '>=16.0.48'
+  hqCli: '>=5.345.210'
 contributes:
   # Exactly the directories under skills/, sorted with LC_ALL=C.
   # scripts/check-contributes.sh fails on any difference.

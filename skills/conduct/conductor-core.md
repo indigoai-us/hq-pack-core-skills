@@ -6,7 +6,7 @@ hosted agents) reads before deciding how to handle a message. Lane mechanics,
 engine choice, standing lanes, and briefs live in `SKILL.md` and load only when work
 actually leaves the session.
 
-The block between the inject markers is what hq-cli's `hq lanes session-start`
+The block between the inject markers is what hq-cli's `hq runners session-start`
 command emits at SessionStart. Keep it under 750 bytes; the rest of this file
 is for the skill and for people.
 

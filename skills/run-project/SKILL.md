@@ -1,7 +1,7 @@
 ---
 name: run-project
 description: "Execute a project's PRD stories through HQ worker lanes that survive compaction. Interactive mode runs in the parent."
-allowed-tools: Read, spawn_agent, wait_agent, Bash(hq lanes create:*), Bash(hq lanes list:*), Bash(hq lanes wait:*), Bash(hq lanes message:*), Bash(hq lanes questions:*), Bash(hq lanes story:*), Bash(bash core/scripts/hq-session.sh:*), Bash(bash core/scripts/run-project-state.sh:*), Bash(node core/scripts/workflow-runner.mjs:*), Bash(bash core/scripts/hq-detach.sh:*), Bash(ps:*), Bash(grep:*), Bash(bash:*), Bash(jq:*), Bash(cat:*), Bash(tail:*), Bash(kill:*), Bash(ls:*), Bash(mkdir:*), Bash(echo:*), Bash(sleep:*), Bash(qmd:*), Bash(test:*), Bash(bash core/scripts/work-mesh-live-bind-trusted.sh:*), Bash(sh core/scripts/pipeline-lane-rows.sh:*), Bash(bash core/scripts/pipeline-conductor.sh:*), Bash(bash core/scripts/pipeline-worker-table.sh:*), Bash(sh core/scripts/pipeline-driver.sh:*), Bash, Write, AskUserQuestion, Task, mcp__visualize__read_me, mcp__visualize__show_widget
+allowed-tools: Read, spawn_agent, wait_agent, Bash(hq runners create:*), Bash(hq runners list:*), Bash(hq runners wait:*), Bash(hq runners message:*), Bash(hq runners questions:*), Bash(hq runners story:*), Bash(bash core/scripts/hq-session.sh:*), Bash(bash core/scripts/run-project-state.sh:*), Bash(node core/scripts/workflow-runner.mjs:*), Bash(bash core/scripts/hq-detach.sh:*), Bash(ps:*), Bash(grep:*), Bash(bash:*), Bash(jq:*), Bash(cat:*), Bash(tail:*), Bash(kill:*), Bash(ls:*), Bash(mkdir:*), Bash(echo:*), Bash(sleep:*), Bash(qmd:*), Bash(test:*), Bash(bash core/scripts/work-mesh-live-bind-trusted.sh:*), Bash(sh core/scripts/pipeline-lane-rows.sh:*), Bash(bash core/scripts/pipeline-conductor.sh:*), Bash(bash core/scripts/pipeline-worker-table.sh:*), Bash(sh core/scripts/pipeline-driver.sh:*), Bash, Write, AskUserQuestion, Task, mcp__visualize__read_me, mcp__visualize__show_widget
 argument-hint: "{project} [--status] [--resume] [--dry-run] [--inline] [--interactive] [--ralph-mode] [--pipeline] [--in-place] [--timeout N]"
 ---
 
@@ -10,11 +10,11 @@ argument-hint: "{project} [--status] [--resume] [--dry-run] [--inline] [--intera
 Codex does not use Claude Code's `Task`, `Plan` sub-agents, `ExitPlanMode`, `/checkpoint`, or `/compact` primitives. The default story path creates an HQ worker lane for each story. If lane execution is unavailable, Codex can use the documented in-session `spawn_agent` / `wait_agent` fallback.
 
 **Default story execution:** one HQ worker lane for each active story, created
-with `hq lanes create` and this session as senior. Interactive mode stays in the
+with `hq runners create` and this session as senior. Interactive mode stays in the
 parent; the pipeline lane behavior below remains separate.
 
 **Pipeline mode (`--pipeline`) live children: one loop lane per confirmed
-worker-table row, plus the regression-gate lane.** `hq lanes create` enforces
+worker-table row, plus the regression-gate lane.** `hq runners create` enforces
 company admission and capacity. A capacity refusal leaves the story queued for
 the next driver tick. The pipeline driver that routes phases is a detached
 script, not a lane, and takes no lane slot.
@@ -81,7 +81,7 @@ Everything else auto-continues exactly like ralph-mode. Failed or blocked storie
 
 > **Note on the legacy detached orchestrator — not the same thing as a lane.** Earlier versions of this skill launched a detached shell subprocess (`nohup bash run-project.sh … --engine claude`) that ran one headless `claude -p` builder per story, outside the pool and outside the worker system. *That* path is retired: `run-project.sh`'s execution loop is frozen and kept only for `--status`, `--dry-run`, and `--help`; it no longer runs stories, and it has no `claude` builder. The `--engine`/`--builder`, `--swarm`, `--tmux`, `--codex-autofix`, and `--no-monitor` flags belonged to it and are not accepted.
 >
-> Current story lanes are created through `hq lanes create`, carry the invoking session as senior, and run `/execute-task` rather than a bare headless builder.
+> Current story lanes are created through `hq runners create`, carry the invoking session as senior, and run `/execute-task` rather than a bare headless builder.
 
 ## Step 2 — Status, Help, and Dry Run
 
@@ -107,7 +107,7 @@ This is advisory, not a hard stop — many projects (CLIs, infra, libraries) hav
 ## Step 3 — Default Execution: Story Lanes
 
 The parent plans and coordinates. Each story runs through `/execute-task` in a
-worker lane created with `hq lanes create`; the lane is attributed to the bound
+worker lane created with `hq runners create`; the lane is attributed to the bound
 company, project, and story, and this invoking session is its senior. The lane
 runs the existing worker phases, quality gates, handoffs, and commit checks in
 `.claude/skills/execute-task/SKILL.md`.
@@ -155,7 +155,7 @@ For each approved incomplete story:
 2. Write the story brief to a file and create the story worker lane:
 
    ```bash
-   hq lanes create --company "{company}" --project "{project}" \
+   hq runners create --company "{company}" --project "{project}" \
      --story "{story-id}" --worker "{worker-id}" \
      --brief-file "{brief path}" --senior "session:{session-id}" \
      --account auto --json
@@ -170,13 +170,13 @@ For each approved incomplete story:
    the `verify-story-deliverables.sh` evidence gate. Use
    the same story id for every lane created for its phases. A repeat create for
    the same worker under the same senior continues that worker's previous
-   thread. If its lane is live, send the follow-up with `hq lanes message`.
+   thread. If its lane is live, send the follow-up with `hq runners message`.
    Read the JSON body for `ok`, `lane_id`, and admission/capacity errors. A
    capacity refusal leaves the story queued for the next tick.
-3. Start and verify the policy-required detached watcher, then wait with `hq lanes wait --any {lane-id} --for envelope
+3. Start and verify the policy-required detached watcher, then wait with `hq runners wait --any {lane-id} --for envelope
    --for question --for state --timeout {seconds} --json`. Questions use the
-   existing user decision flow and `hq lanes questions` commands.
-4. Read the latest lane envelope from `hq lanes list --json` and its
+   existing user decision flow and `hq runners questions` commands.
+4. Read the latest lane envelope from `hq runners list --json` and its
    `last_envelope.ref`. Parse the envelope with `jq -e`, then validate the story id, worker proof, artifacts,
    back-pressure results, and parent-visible commits before advancing. Retry
    malformed JSON exactly once with the existing stricter reminder; if the
@@ -185,7 +185,7 @@ For each approved incomplete story:
 5. Preserve the one-line story narration and bounded parent reads. Keep detailed
    logs and long notes on disk. Do not use conduct pool state as the result
    source.
-6. Update story status through the board and `hq lanes story` wherever the
+6. Update story status through the board and `hq runners story` wherever the
    skill already updates status. Do not add status fields to local `prd.json`;
    `passes` remains spec acceptance data, not a board column. Mark `passes: true`
    only after the existing evidence and quality gates pass.
@@ -201,7 +201,7 @@ Stories are dispatched one at a time by default. Independent stories may run
 concurrently only when their worker ids differ, they have no dependency or file
 conflict, and lane admission accepts each create. A same-worker story reuses its
 existing lane. Do not create a second lane for a worker that is still live; use
-`hq lanes message` for its next brief. Admission and capacity refusals remain
+`hq runners message` for its next brief. Admission and capacity refusals remain
 queued for a later tick rather than bypassing the lane limit.
 
 ### 3c. Regression Gates
@@ -218,10 +218,10 @@ path.
 
 ### 3d. Budget and Recovery
 
-- Worker lanes are created with `hq lanes create`; admission and capacity are
+- Worker lanes are created with `hq runners create`; admission and capacity are
   owned by HQ lanes. Keep only one lane per worker and senior, and use
-  `hq lanes message` while it is live.
-- A completed phase's result comes from its lane envelope. `hq lanes list
+  `hq runners message` while it is live.
+- A completed phase's result comes from its lane envelope. `hq runners list
   --json` provides lane state and the latest envelope reference; it is not a
   substitute for reading the envelope itself.
 - A lane that is still live after the parent turn is resumable. On recovery,
@@ -241,10 +241,10 @@ path.
 Only with `--pipeline`. Without the flag, skip this whole step: the default
 path is the story coordinator lanes of Step 3, and nothing below changes it.
 
-In pipeline mode each worker gets one `hq lanes` loop lane for the whole run.
+In pipeline mode each worker gets one `hq runners` loop lane for the whole run.
 A detached driver, `core/scripts/pipeline-driver.sh`, owns the story queue: it
 calls `core/scripts/pipeline-conductor.sh` to route each phase with
-`hq lanes enqueue`, accepts each phase's handoff, and re-checks acceptance criteria.
+`hq runners enqueue`, accepts each phase's handoff, and re-checks acceptance criteria.
 The driver makes no engine calls. The parent does not run story coordinators.
 Paths below are under `workspace/orchestrator/{project}/pipeline/`; `{state}`
 is its `state/` subdirectory.
@@ -353,7 +353,7 @@ It exits 2 on an empty model or an engine other than `claude`/`codex`/`grok`;
 treat that as an unanswered row. Each lane block exports `HQ_CONDUCT_ENGINE`
 (the engine its phases run on) and that engine's model and effort pins.
 
-**3P.3 — Lane admission.** The conductor creates one `hq lanes` loop lane the
+**3P.3 — Lane admission.** The conductor creates one `hq runners` loop lane the
 first time a worker is routed, then reuses that lane for the worker's later
 phases. The CLI applies lane capacity and company admission. If `create` returns
 `ok:false` with an admission or capacity error code, the story stays queued and
@@ -485,13 +485,13 @@ exits it writes `{state}/driver/exit` as `<code> <reason>`:
 | 2 | usage error | fix the command |
 | 20 | a regression gate is due | run the gate in the `regression-gate` slot (Step 3c), record `pipeline-conductor.sh gate result pass\|fail --state {state}` (add `--story {id} --note "..."` to a `fail` caused by one verified story: it reopens that story, see 3P.6), relaunch the driver |
 | 21 | a decision is needed: a story is held for approval; a phase returned `blocked`, a story has no worktree for its repo, or a story is `awaiting_go`, and nothing else can move; the gate failed; a phase returned `failed` `--max-phase-fails` times; or a phase's engine exited early twice (`engine_exited_early`, see below) (the reason names the status or `engine_exited_early` and the attempt count; the story is then held as `blocked_needs_owner` with `{state}/decisions/<story>-blocked-<phase>.md` carrying each failed handoff's text) | 3P.6: read the decision item, ask the owner once, run the matching command (`resolve --as retry --prd <prd>` re-reads the story's phases, so fix the sequence first with `overlay set` when the lane was wrong; the attempt count starts over), relaunch the driver |
-| 22 | an in-flight phase passed its deadline with no handoff | check the lane with `hq lanes list --json`, then relaunch the driver or stop the run |
+| 22 | an in-flight phase passed its deadline with no handoff | check the lane with `hq runners list --json`, then relaunch the driver or stop the run |
 | 23 | the conductor helper printed something unexpected | read the last lines of `driver.log`, surface them, do not relaunch blindly |
 | 24 | another driver already runs against `{state}` | leave it; re-arm the waiter on it |
 | 25 | retired: the stall check now fires the stall event and exits 28 | - |
-| 26 | lane down: `hq lanes enqueue` reports `loop_not_running`; the story stays `queued` and its worker mapping is removed | restart the driver; the next route creates a fresh loop lane |
+| 26 | lane down: `hq runners enqueue` reports `loop_not_running`; the story stays `queued` and its worker mapping is removed | restart the driver; the next route creates a fresh loop lane |
 | 27 | no lane: a phase's worker has no row in `pipeline/table.tsv`; the reason names the worker and the story stays `queued` | add the row (ask the owner for its engine and model), launch that worker's loop lane as 3P.5 does, relaunch the driver |
-| 28 | a loop lane parked its phase after repeated stalls and raised a question | list its pending question with `hq lanes questions list --company {company} --json`, answer it, then restart the driver |
+| 28 | a loop lane parked its phase after repeated stalls and raised a question | list its pending question with `hq runners questions list --company {company} --json`, answer it, then restart the driver |
 | 29 | stopped on request: the parent ran `pipeline-conductor.sh stop` (see "Stopping a run" below) | relaunch the driver when the owner wants to resume |
 | 130, 143 | interrupted or terminated; in-flight phases are marked `interrupted` first | relaunch the driver; it routes interrupted stories first |
 
@@ -507,7 +507,7 @@ holds the story for the owner (exit 21 naming `engine_exited_early`; the
 decision item carries the reason). A phase whose engine is still running keeps
 the deadline path (exit 22).
 
-**Loop lane admission.** `hq lanes create --loop` applies lane admission and
+**Loop lane admission.** `hq runners create --loop` applies lane admission and
 capacity rules. Admission or capacity refusals leave the story queued for the
 next tick. A stopped or failed lane is removed from `lanes.json` and recreated
 on the next route.
@@ -572,8 +572,8 @@ only loop, and it runs outside every lane.
   phase.
 - Surfaces decision items through the decision queue (`/decision-queue`), one
   at a time: approval items in `{state}/decisions/` marked `status: pending`,
-  and loop lane questions with `hq lanes questions list --company {company}
-  --json`. Answer with `hq lanes questions answer`. Apply
+  and loop lane questions with `hq runners questions list --company {company}
+  --json`. Answer with `hq runners questions answer`. Apply
   each answer with `pipeline-conductor.sh release`, or as the item's options
   describe, then relaunch the driver.
 - On exit 21 for a blocked story (`decisions/<story>-blocked-<phase>.md`,
@@ -632,13 +632,13 @@ rebuild it from `state.json` (`session_id`), `pipeline/table.tsv`,
 `{state}/stories/` (each story's phase and state), `{state}/report.md`,
 `{state}/decisions/`, `{state}/driver/` (`driver.pid` while it runs, `exit`
 once it stopped, `driver.log`), `workspace/sessions/<id>/decisions.jsonl`, and
-`hq lanes list --json` filtered to ids in `{state}/lanes.json` for live lanes.
+`hq runners list --json` filtered to ids in `{state}/lanes.json` for live lanes.
 Do not relaunch a lane whose loop state is `waiting` or `running`. If `driver.pid`
 names a live process, re-arm the waiter; if `exit` is present, act on its code;
 if neither, relaunch the driver.
 
 **3P.8 — Run end: stop every lane.** The driver stops each lane id in
-`{state}/lanes.json`. It reports completion only when `hq lanes list --json`
+`{state}/lanes.json`. It reports completion only when `hq runners list --json`
 shows every owned loop state as `stopped` or the lane is absent from the list.
 It clears the mapping after confirmation so a resumed run creates fresh lanes.
 Then continue with Step 6.
@@ -692,7 +692,7 @@ means no prompts between stories **within a session**, not a run that drives
 itself after the session is gone.
 
 That makes the run *resumable*, not *self-driving*, and resuming takes a new
-session: `hq lanes list --json` shows the lanes launched by the session, and
+session: `hq runners list --json` shows the lanes launched by the session, and
 `state.json` says which stories are done. A genuinely self-driving run would
 need the loop itself dispatched as a lane — an extra coordinator level with its
 own lane accounting — which does not exist today. Do not tell a user their run
@@ -724,7 +724,7 @@ keyed by the session that created them, and a bare `list` in a fresh session
 reports an empty pool while the old lanes are still live:
 
 ```bash
-hq lanes list --json --senior "session:$(jq -r .session_id workspace/orchestrator/{project}/state.json)"
+hq runners list --json --senior "session:$(jq -r .session_id workspace/orchestrator/{project}/state.json)"
 ```
 
 That listing names the live lanes and their current state. Re-arm a waiter (dispatch
@@ -752,9 +752,9 @@ After either mode completes:
 
 - **Do not reference `.Codex/commands/run-project.md` as required source** — this skill is the Codex router.
 - **Do not assume Claude-only primitives** — `Task`, `ExitPlanMode`, `/checkpoint`, and `/compact` are not Codex requirements.
-- **Default stories run through `/execute-task` in an HQ worker lane** created with `hq lanes create`, using the bound company, project, story, worker, brief file, and `--senior session:{id}`. Interactive mode stays parent-driven.
+- **Default stories run through `/execute-task` in an HQ worker lane** created with `hq runners create`, using the bound company, project, story, worker, brief file, and `--senior session:{id}`. Interactive mode stays parent-driven.
 - **Carry trusted company and story context into every lane** — resolve the company from the run state and pass the project and story explicitly. Never infer a company from cwd.
-- **Use lane results as the delivery record** — inspect `hq lanes list --json`, then read the latest envelope. Do not infer success from local process state or exit code.
+- **Use lane results as the delivery record** — inspect `hq runners list --json`, then read the latest envelope. Do not infer success from local process state or exit code.
 - **Preserve HQ invariants** — PRD acceptance data, board status, file locks, active-run coordination, commits per story, JSON returns, evidence, and quality gates remain required in every mode.
 - **Ask before mode changes** — switching from the default story-lane path to parent-driven interactive or Ralph/headless is a user-facing execution semantic. Preserve the decision gate with text fallback if needed.
 - **Budget mode is default** — prefer low-reasoning story execution, compact JSON returns, bounded log reads, changed-repo regression gates, and no parent-side phase fanout.

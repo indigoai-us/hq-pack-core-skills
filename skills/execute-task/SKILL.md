@@ -1,7 +1,7 @@
 ---
 name: execute-task
 description: "Execute one PRD story through coordinated worker phases with test, lint, and typecheck gates."
-allowed-tools: Task, Read, Write, Glob, Grep, Bash(bash core/scripts/work-mesh-live-bind-trusted.sh:*), Bash(bash core/scripts/verify-story-deliverables.sh:*), Bash(hq lanes create:*), Bash(hq lanes list:*), Bash(hq lanes wait:*), Bash(hq lanes message:*), Bash(bash core/scripts/hq-session.sh:*), Bash, Bash(core/scripts/audit-log.sh:*), AskUserQuestion, Bash(bash core/scripts/read-policy-frontmatter.sh:*), Bash(bash core/scripts/worker-codex-model.sh:*)
+allowed-tools: Task, Read, Write, Glob, Grep, Bash(bash core/scripts/work-mesh-live-bind-trusted.sh:*), Bash(bash core/scripts/verify-story-deliverables.sh:*), Bash(hq runners create:*), Bash(hq runners list:*), Bash(hq runners wait:*), Bash(hq runners message:*), Bash(bash core/scripts/hq-session.sh:*), Bash, Bash(core/scripts/audit-log.sh:*), AskUserQuestion, Bash(bash core/scripts/read-policy-frontmatter.sh:*), Bash(bash core/scripts/worker-codex-model.sh:*)
 ---
 
 # Execute Task - Worker-Coordinated Story Execution
@@ -10,10 +10,10 @@ Execute a single user story from a PRD through coordinated worker phases. Each w
 
 **Usage:** `execute-task {project}/{task-id}`
 
-Every assigned worker phase runs through `hq lanes create` (step 6c), with this
+Every assigned worker phase runs through `hq runners create` (step 6c), with this
 session as senior and the story id on every lane. The same worker lane continues
 its thread across phases under that senior. If it is still live, send the next
-phase with `hq lanes message`; read completed work from its lane envelope.
+phase with `hq runners message`; read completed work from its lane envelope.
 
 **User's input:** `$ARGUMENTS`
 
@@ -23,7 +23,7 @@ phase with `hq lanes message`; read completed work from its lane envelope.
 
 - One HQ worker lane per worker and senior, continued across phases
 - Keep the existing worker context and handoff files available across phases
-- HQ worker lanes do the phase work through `hq lanes create`
+- HQ worker lanes do the phase work through `hq runners create`
 - Back pressure keeps code on rails
 - Handoffs preserve context between workers
 - Each worker lane commits its own work before returning
@@ -70,14 +70,14 @@ All normal execute-task behavior still runs (task classification, worker sequenc
 
 ## Runtime Adapter: HQ Worker Lanes
 
-Worker phases use `hq lanes create` in every runtime. The invoking session is
+Worker phases use `hq runners create` in every runtime. The invoking session is
 recorded as senior, and every phase carries the active company, project, story,
 worker, and brief file. HQ lanes owns provider launch, continuity, admission,
 and durable lane state. The caller reads the phase result from the lane envelope
 and keeps the handoff file format documented below.
 
 Do not substitute `Task`, `spawn_agent`, or a headless builder for a phase lane.
-If `hq lanes` is unavailable or refuses the request, preserve the phase as
+If `hq runners` is unavailable or refuses the request, preserve the phase as
 queued or report the specific blocker. Do not simulate the worker sequence in
 the parent.
 
@@ -546,7 +546,7 @@ Include applicable policy rules in worker prompts (step 6b) under `### Applicabl
 
 ### 6. Execute Each Phase
 
-For each worker in the sequence, create or continue its HQ worker lane with `hq lanes create`, passing the active company, project, story, worker, brief file, and invoking session as senior. Message a live lane with `hq lanes message`. Each worker commits its work before returning and passes a structured handoff to the next phase.
+For each worker in the sequence, create or continue its HQ worker lane with `hq runners create`, passing the active company, project, story, worker, brief file, and invoking session as senior. Message a live lane with `hq runners message`. Each worker commits its work before returning and passes a structured handoff to the next phase.
 
 #### 6a. Load Worker Config
 
@@ -674,7 +674,7 @@ Every phase assigned to a worker uses the same lane mapping as `/conduct`:
    and `--senior session:{session-id}`:
 
    ```bash
-   hq lanes create --company "{company}" --project "{project}" \
+   hq runners create --company "{company}" --project "{project}" \
      --story "{task.id}" --worker "{worker.id}" \
      --brief-file "{phase brief path}" --senior "session:{session-id}" \
      --account auto --json
@@ -690,17 +690,17 @@ Every phase assigned to a worker uses the same lane mapping as `/conduct`:
    JSON body, including `ok`, `lane_id`, and any admission/capacity error; do
    not infer delivery from the command exit code.
 3. A repeated create for the same worker and senior continues that worker's
-   previous lane thread. If `hq lanes list --json` shows that lane is still
-   live, deliver the follow-up brief with `hq lanes message {lane-id}
+   previous lane thread. If `hq runners list --json` shows that lane is still
+   live, deliver the follow-up brief with `hq runners message {lane-id}
    --text-file {phase brief path} --json` instead of creating another lane.
    An admission or capacity refusal leaves the phase queued for the next tick.
 4. Start and verify the policy-required detached watcher, then wait for an envelope, question, or state change with
-   `hq lanes wait --any {lane-id} --for envelope --for question --for state
+   `hq runners wait --any {lane-id} --for envelope --for question --for state
    --timeout {seconds} --json`. Questions retain the existing user decision
-   path; answer them through `hq lanes questions answer`.
+   path; answer them through `hq runners questions answer`.
 5. Read the lane's latest `hq-lane-envelope.v1` from the reference reported by
-   `hq lanes list --json` (or the lane's `last_envelope.ref`). Read the lane's
-   state with `hq lanes show {lane-id} --json`. Validate the envelope and phase
+   `hq runners list --json` (or the lane's `last_envelope.ref`). Read the lane's
+   state with `hq runners show {lane-id} --json`. Validate the envelope and phase
    handoff before continuing.
 
 The lane envelope carries the phase result. Keep the existing handoff JSON
@@ -825,7 +825,7 @@ Also run ALL existing story tests to verify no regressions:
 
 #### 6d. Process Worker Output
 
-Read the completed lane's latest envelope from `hq lanes list --json` and its
+Read the completed lane's latest envelope from `hq runners list --json` and its
 `last_envelope.ref`. The lane records its own state; there is no `record` or
 pool-release call. Parse the envelope and validate the worker's phase handoff
 before branching on success or failure.

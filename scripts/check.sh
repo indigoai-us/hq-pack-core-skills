@@ -10,6 +10,8 @@
 #   company-bind   scripts/vendor/lint-skill-company-bind.sh skills
 #   commands-json  scripts/vendor/skill-inventory.sh --check (the committed
 #                  commands.json equals a fresh render)
+#   no-lanes-alias scripts/check-no-lanes-alias.sh (no file under skills/ or
+#                  commands.json contains the literal `hq lanes` alias)
 #
 # All checks run even when an earlier one fails; the exit code is 1 when any
 # failed. Regenerate commands.json with:
@@ -34,6 +36,7 @@ run contributes bash "$SCRIPTS/check-contributes.sh" "$ROOT"
 run frontmatter bash "$SCRIPTS/check-frontmatter.sh" "$ROOT"
 run company-bind bash "$SCRIPTS/vendor/lint-skill-company-bind.sh" "$ROOT/skills"
 run commands-json bash "$SCRIPTS/vendor/skill-inventory.sh" --root "$ROOT" --check
+run no-lanes-alias bash "$SCRIPTS/check-no-lanes-alias.sh" "$ROOT"
 
 if [[ "${#failed[@]}" -gt 0 ]]; then
   echo "FAILED: ${failed[*]}" >&2

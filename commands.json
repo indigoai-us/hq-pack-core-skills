@@ -209,7 +209,7 @@
     },
     {
       "name": "conduct",
-      "description": "Orchestrator mode: coordinate only; small tasks go to subagents, worker areas to standing hq lanes. Triggers: /conduct, run everything in the background.",
+      "description": "Orchestrator mode: coordinate only; small tasks go to subagents, worker areas to standing hq runners. Triggers: /conduct, run everything in the background.",
       "scope": "core",
       "tags": [],
       "searchTerms": [],
@@ -217,7 +217,7 @@
       "skillUid": null,
       "group": "session state",
       "source": "skills/conduct/SKILL.md",
-      "hash": "sha256:9625484d207b018d24274374c2de0febfda74ba79924a4e3afef10b2eada4ce6",
+      "hash": "sha256:d0840efe39984f658223460deaaed2343499c4db7d574538631fef23a9b4b098",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -234,7 +234,7 @@
       "skillUid": null,
       "group": "session state",
       "source": "skills/conduct-join/SKILL.md",
-      "hash": "sha256:9dda576434841c667ebd2a2a766f2c1cba611ad75c65545840923fd20c7a6ab6",
+      "hash": "sha256:de5abeefa7774ab96d01c678877998797cd373bfcb2daad39fe1eeaf3e98dcd6",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -302,7 +302,7 @@
       "skillUid": null,
       "group": "other",
       "source": "skills/decision-desk/SKILL.md",
-      "hash": "sha256:01b4f86be466e3f2339ea890ca7d841e513b9cf5f5ebc6833c1fbd003b289809",
+      "hash": "sha256:19fd0d8a34e4617b1d936f038f69a8ac328c47daf71cb36de37673e3d2ca7fcc",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -319,7 +319,7 @@
       "skillUid": null,
       "group": "other",
       "source": "skills/decision-queue/SKILL.md",
-      "hash": "sha256:cda0fc33e435f5564d7f08d350696bfa878d43d7be0ee6994176b131a5c2b0e3",
+      "hash": "sha256:1badce8991246998180e891c0de028c051ed0825fc6c635c8b9a150d8f620f99",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -506,7 +506,7 @@
       "skillUid": null,
       "group": "ship",
       "source": "skills/execute-task/SKILL.md",
-      "hash": "sha256:10236931b51c90108bd2b16408d72dc4d03cb7397c6c21ced8b339eab1e981ea",
+      "hash": "sha256:15a724f069c63ddb009c7cbbe8224efcbc87f73efc3d640b66d8ca12039725c0",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -1264,7 +1264,7 @@
       "skillUid": null,
       "group": "session state",
       "source": "skills/overnight/SKILL.md",
-      "hash": "sha256:75c53dde38de7ab13ef05346446911a6a93d66c9511c27fa4ed0dad9303d1a63",
+      "hash": "sha256:dd0bb306b45d5b8abb734381240f97dce9e038b0cfbd64c74ad136f423b3fcf8",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -1553,7 +1553,7 @@
       "skillUid": null,
       "group": "ship",
       "source": "skills/run-project/SKILL.md",
-      "hash": "sha256:019bde6b832c827de250c477b51e29b6a95d804b9826ec4bd77f3c1ba5367661",
+      "hash": "sha256:7e582ff0b8f963fdf365b90c170bd36f27bcb530c72573641ece85a6199db8bb",
       "duplicates": {
         "exact": [],
         "drifted": [],
@@ -1689,7 +1689,7 @@
       "skillUid": null,
       "group": "session state",
       "source": "skills/super-conductor/SKILL.md",
-      "hash": "sha256:dc7c4ed2f1e4d54f7d8b95d7180be51fd40fbdfbb8103a7d85b3dc9805cca0d0",
+      "hash": "sha256:23225912358165788915d707c82712d6c5d95be76910e228d53e4512c3dbe624",
       "duplicates": {
         "exact": [],
         "drifted": [],

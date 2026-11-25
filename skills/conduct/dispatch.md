@@ -2,7 +2,7 @@
 
 This module applies to every task except an inline answer from loaded
 context or one status read: the conductor does no project work itself. A
-worker is a background subagent in this session or an `hq lanes` worker lane;
+worker is a background subagent in this session or an `hq runners` worker lane;
 the invoking session is its senior either way. Lanes use the shared mapping in
 `.claude/skills/_shared/lane-dispatch-protocol.md` and the same lifecycle used
 by `/execute-task` and `/run-project`.
@@ -26,7 +26,7 @@ Under `mixed` (the default, owner decision 2026-10-22):
   such task, reused for every later task for the same worker and company.
 - Ongoing work with no matching worker, and every small bounded task with no
   matching worker (a lookup, a check, a draft), goes to a background
-  subagent. `hq lanes create --worker` needs a registered worker, so there is
+  subagent. `hq runners create --worker` needs a registered worker, so there is
   no standing lane without one.
 - Nothing runs inline beyond an answer from loaded context or one status read.
 
@@ -42,7 +42,7 @@ Use a one-shot lane even when the runner is `subagent` when any of these hold:
 - The engine is not Claude, or the host has no `Agent` tool (Codex sessions).
 - The owner asked for a lane for this task.
 
-Use a subagent even when the runner is `lane` when `hq lanes create` returns
+Use a subagent even when the runner is `lane` when `hq runners create` returns
 `ok:false` with `no_account_with_room` or any other admission or capacity
 code. Report the switch in one line, for example
 `lanes refused (no_account_with_room, next reset <next_reset>); running as a subagent`.
@@ -77,10 +77,10 @@ and takes every task in its area.
    (or `--account auto`), and `--allow-extra-usage` flags from "How work
    leaves this session". When the session already recorded a lane for that
    worker and company and the lane can still take messages, `send` passes the
-   brief with `hq lanes message <lane> --text-file <brief>` and prints
-   `"action":"reused"`. Otherwise it runs `hq lanes create --company <company>
+   brief with `hq runners message <lane> --text-file <brief>` and prints
+   `"action":"reused"`. Otherwise it runs `hq runners create --company <company>
    --worker <worker> --keep-alive --senior session:<session-id>`, then
-   `hq lanes keep-alive <lane> --on --standing` so the lane waits for queued
+   `hq runners keep-alive <lane> --on --standing` so the lane waits for queued
    work after every done turn, records the lane in
    `workspace/sessions/<session-id>/conduct-standing-lanes.json`, and prints
    `"action":"opened"`. A repeated create for the same worker and senior
@@ -88,19 +88,19 @@ and takes every task in its area.
 3. `--company` is required. Every lane is bound to its company
    (`hq-background-jobs-require-bound-company`), and a standing lane is never
    reused across companies.
-4. Exit 3 means `hq lanes create` refused (capacity or admission). The create
+4. Exit 3 means `hq runners create` refused (capacity or admission). The create
    JSON is on stdout. Run the same brief as a subagent and report the switch
    in one line, as in "Runner".
 5. Arm the watcher for the lane round as for any lane message or create
-   (round id, `since`, `Monitor(hq lanes watch <lane>)` or the Codex watcher).
+   (round id, `since`, `Monitor(hq runners watch <lane>)` or the Codex watcher).
 6. Close on `/conduct off`, `/handoff`, or when the owner says the area is
    finished: `bash core/scripts/conduct-standing.sh close` turns keep-alive
-   off with `hq lanes keep-alive <lane> --off` and interrupts each lane with
-   `hq lanes interrupt`, so the lane stays resumable for a later session.
+   off with `hq runners keep-alive <lane> --off` and interrupts each lane with
+   `hq runners interrupt`, so the lane stays resumable for a later session.
    `--dry-run` lists what it would close. Use `conduct-standing.sh forget
    --lane <id>` to drop one lane from the record after closing it by hand.
 
-`hq lanes doctor` and `hq lanes keep-alive-audit` report keep-alive lanes
+`hq runners doctor` and `hq runners keep-alive-audit` report keep-alive lanes
 blocked by retired, superseded, or pending-question state; run them in
 `/conduct status` when a standing lane looks stuck.
 
@@ -151,7 +151,7 @@ blocked by retired, superseded, or pending-question state; run them in
 5. Return to the owner. The app wakes this session when the subagent
    finishes; do not poll it. Send a correction to a running subagent with
    `SendMessage` to its agent id. That message is an instruction, as with
-   `hq lanes message`.
+   `hq runners message`.
 6. On completion, read `report.md` and the envelope file, not only the
    closing message, and verify them as in Step 6. Never Read the harness's
    own task transcript (the `<agent-id>.output` JSONL the Agent tool writes
@@ -166,12 +166,12 @@ Subagent runs spend this session's Claude usage and stop if this session
 ends. Keep long results in sidecar logs in the worktree and name those logs
 from the envelope so they do not fill this session's context.
 
-hq-cli 5.345.151 ships `hq lanes create --runner subagent`, which registers a
+hq-cli 5.345.151 ships `hq runners create --runner subagent`, which registers a
 lane that an in-session subagent runs: it skips admission and starts no
 process. Register each subagent run with it (with `--company`, `--worker`,
 `--brief-file`, and `--senior session:<session-id>`) so the run shows in
-`hq lanes list`, record the returned lane id in `runs.json`, and report the
-result with `hq lanes progress <lane> --envelope <path>` (or `--failed
+`hq runners list`, record the returned lane id in `runs.json`, and report the
+result with `hq runners progress <lane> --envelope <path>` (or `--failed
 <reason>` when the subagent ended without an envelope). On an older hq-cli,
 or when the registration fails, the status rows in Step 7 come from
 `runs.json` alone.
@@ -203,12 +203,12 @@ are one pool across companies, and hq-cli records its pick as the lane's
 1. Resolve the active company, project, story, and worker profile. A task in
    a worker area goes through "Standing worker lanes" above. For any other
    lane, reuse an existing lane under this senior when its repo and task fit.
-   Check `hq lanes list --json --senior session:<session-id>` first.
+   Check `hq runners list --json --senior session:<session-id>` first.
 2. Write the complete task brief to a file. Include done criteria, company and
    repo paths, constraints, required tests, and the JSON envelope path.
 3. Create a worker lane using the mapping below. Keep HQ root as the CLI cwd.
    ```bash
-   hq lanes create --company <company> --project <project> --story <story> \
+   hq runners create --company <company> --project <project> --story <story> \
      --worker <worker> --brief-file <brief> --senior session:<session-id> --json
    ```
    Add `--provider` from `conduct_engine`, `--model` from
@@ -219,7 +219,7 @@ are one pool across companies, and hq-cli records its pick as the lane's
    is set, pass `--account auto` so hq-cli picks the account with the most room
    from the shared pool. A repeated create for the same worker and
    senior continues its prior lane thread. If the lane is live, send follow-up work with
-   `hq lanes message <lane> --text <instruction>`.
+   `hq runners message <lane> --text <instruction>`.
 4. Parse the JSON response. An admission or capacity refusal, including
    `no_account_with_room` from `--account auto`, moves the task to a subagent
    with the same brief (see "Runner"). Report the switch and the soonest reset
@@ -234,23 +234,23 @@ are one pool across companies, and hq-cli records its pick as the lane's
    signed-out accounts under `skipped[]`; raise one owner card per
    account as described in
    [Signed-out accounts](#signed-out-accounts-one-owner-card-per-account).
-5. Immediately before every `hq lanes create`, generate a unique `round_id`
+5. Immediately before every `hq runners create`, generate a unique `round_id`
    and capture the round baseline `since` in UTC seconds. After the create
    returns its lane id, arm one Codex watcher for that lane and round:
    ```bash
    round_id="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-   hq lanes create ...
+   hq runners create ...
    bash core/scripts/lanes-completion-watch.sh start --lane <lane-id> \
      --provider codex --session-id "$CODEX_SESSION_ID" \
      --since "$since" --round-id "$round_id"
    ```
-   Claude parents arm `Monitor(hq lanes watch <lane>)` or a bounded background
-   `hq lanes wait` before returning.
+   Claude parents arm `Monitor(hq runners watch <lane>)` or a bounded background
+   `hq runners wait` before returning.
    This starts a persistent `hq monitor` targeted to
-   `session:codex:$CODEX_SESSION_ID`. The monitor command checks `hq lanes show`
+   `session:codex:$CODEX_SESSION_ID`. The monitor command checks `hq runners show`
    before waiting and after every bounded
-   `hq lanes wait --any <lane> --for envelope --for state --for question --timeout <seconds> --json` result. It
+   `hq runners wait --any <lane> --for envelope --for state --for question --timeout <seconds> --json` result. It
    emits only an outcome at or after `since`. Receipt and monitor records are
    keyed by lane, `since`, and unique round ID, so separate dispatches in the
    same second still get separate records. Reusing the same round ID makes a
@@ -271,7 +271,7 @@ inside a worker do not deliver lane messages to the parent through that event.
 
 ## Signed-out accounts: one owner card per account
 
-`hq lanes create --account auto` and `hq capacity route --json` list every
+`hq runners create --account auto` and `hq capacity route --json` list every
 account they passed over under `skipped[]`. The `no_account_with_room` error
 carries `skipped[]` too. Read `skipped[]` on every create response, refused or
 not, and on every `hq capacity route --json` this session runs.
@@ -370,7 +370,7 @@ The answer arrives in this session's executive inbox as
 `Executive decision <card_id> ("Sign back in: ..."): <choice>`. Match the card
 id to the dedupe entry.
 
-- `Disable this account`: run `hq lanes accounts disable <provider> <account>`,
+- `Disable this account`: run `hq runners accounts disable <provider> <account>`,
   then set `state` to `disabled` and record the time as `disabled_at`. Report
   the change in one line.
 - `I ran it`: run `hq capacity accounts --json` once. If the account is signed
@@ -383,7 +383,7 @@ id to the dedupe entry.
 
 ### Worked example
 
-`hq lanes create ... --account auto --json` returns this entry:
+`hq runners create ... --account auto --json` returns this entry:
 
 ```json
 {
@@ -504,7 +504,7 @@ must resolve to its own profile so the lane registry can preserve its thread.
 ## Step 3: Assign a pool slot
 
 This step applies to lanes only; subagents take no pool slot. There is no
-conduct pool. `hq lanes create` is the admission operation and applies
+conduct pool. `hq runners create` is the admission operation and applies
 hq-cli's provider, account, host, and lane capacity rules. If admission
 returns `ok:false` with an admission or capacity code, run the task as a
 subagent (see "Runner"), or leave it queued when it must outlive this session.
@@ -526,27 +526,27 @@ point, then receives the task-specific requirements and acceptance criteria.
 
 ## Step 5: Launch the lane, detached
 
-Run `hq lanes create` from the HQ root with `--senior session:<this session>`.
+Run `hq runners create` from the HQ root with `--senior session:<this session>`.
 Read the returned JSON for `ok`, `lane_id`, and any admission code. The CLI
 launches asynchronously; do not wait in this session for the worker to finish.
 Arm the watcher immediately.
 
 ### Tell and close linked sessions
 
-Send and close operations use `hq lanes link send` and `hq lanes link close`,
+Send and close operations use `hq runners link send` and `hq runners link close`,
 with the existing link, child, session, text, and note flags. For example:
-`hq lanes link send --link <link-id> --child <child> --session-id <session-id>
+`hq runners link send --link <link-id> --child <child> --session-id <session-id>
 --text <message>`. Do not use a conduct-specific link wrapper.
 
 ## Step 5b: Send a message to a lane that is already running
 
 Generate a unique `round_id`, then capture `since="$(date -u
-%Y-%m-%dT%H:%M:%SZ)"` immediately before each `hq lanes message`. After the
+%Y-%m-%dT%H:%M:%SZ)"` immediately before each `hq runners message`. After the
 command returns, arm a new round watcher with `bash
 core/scripts/lanes-completion-watch.sh start --lane <lane> --provider codex
 --session-id "$CODEX_SESSION_ID" --since "$since" --round-id "$round_id"`. Use
-`hq lanes message <lane> --text <instruction>` (or `--text-file`) for a
-worker lane. Use `hq lanes link send` for an adopted session. Include the
+`hq runners message <lane> --text <instruction>` (or `--text-file`) for a
+worker lane. Use `hq runners link send` for an adopted session. Include the
 project and story flags when changing attribution. A live worker's message is
 an instruction and may supersede its original brief.
 
@@ -554,11 +554,11 @@ an instruction and may supersede its original brief.
 
 Before answering a lane question or resuming a lane, generate a unique
 `round_id`, then capture a fresh `since` immediately before the
-`hq lanes questions answer` or `hq lanes resume` call. Afterward, start a new
+`hq runners questions answer` or `hq runners resume` call. Afterward, start a new
 Codex watcher for that lane round with `--since "$since" --round-id
 "$round_id"`.
 
-For a lane, use `hq lanes show <lane> --json` and the lane's envelope. For a
+For a lane, use `hq runners show <lane> --json` and the lane's envelope. For a
 subagent, use the envelope file named in its brief and the report file
 named in the same brief. Treat
 `decision: "done"` as a report to verify, not proof by itself. Inspect the
@@ -570,19 +570,19 @@ lane's exit code never determines whether its artifacts were delivered.
 
 Generate a unique `round_id` before every role-lane dispatch, then capture
 `since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"` immediately before each create,
-message, resume, or `hq lanes questions answer` call. After each call, start
+message, resume, or `hq runners questions answer` call. After each call, start
 one Codex completion watcher with that lane, `--since "$since"`, and
 `--round-id "$round_id"`. This includes QA-failure returns and each CI-fix
-round on a reused lane. Claude parents keep the `Monitor(hq lanes watch ...)`
+round on a reused lane. Claude parents keep the `Monitor(hq runners watch ...)`
 path.
 
 `--workers <roles>` opens one standing lane for each requested role with
 `conduct-standing.sh send --worker <profile>`, using the role mapping in
 Step 2. Pin provider,
 model, effort, and account once per session and pass those pins to each
-`hq lanes create`. With no account pin, pass `--account auto` to each one. Build each brief from the matching role template. The role
+`hq runners create`. With no account pin, pass `--account auto` to each one. Build each brief from the matching role template. The role
 slot is one worker lane; create resumes that worker's previous lane thread when
-possible. If it is still live, send the next instruction with `hq lanes
+possible. If it is still live, send the next instruction with `hq runners
 message`.
 
 For a QA lane, use `lanes-workers.sh needs-qa`: frontend and designer roles
@@ -593,11 +593,11 @@ from pass. Count CI fix rounds with `lanes-workers.sh ci-round`; after the
 configured maximum, return the decision to the operator rather than looping.
 When `needs-qa` returns `yes`, create a `qa-tester` lane from the QA role brief,
 send it the PR URL, and wait for its envelope. Return QA failures to the owning
-implementation lane with `hq lanes message`; report the QA result with CI.
+implementation lane with `hq runners message`; report the QA result with CI.
 
 ## Step 7: End every turn with one row per running worker
 
-List lanes launched by this session with `hq lanes list --json --senior
+List lanes launched by this session with `hq runners list --json --senior
 session:<this session>`. For each active row include the lane id, worker,
 state, `last_line`, PR, pending inbox count, elapsed time, and exit status when
 present. Mark standing lanes from `conduct-standing.sh list` with a
@@ -615,8 +615,8 @@ each create passes `--account auto`. Then run:
 
 ```bash
 hq capacity route --json
-hq lanes show <lane-1> --json
-hq lanes show <lane-2> --json
+hq runners show <lane-1> --json
+hq runners show <lane-2> --json
 ```
 
 Each lane's `account_pick` should name the account the router picked at the

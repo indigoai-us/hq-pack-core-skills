@@ -85,6 +85,7 @@ expect_pass "clean tree: check-frontmatter passes" bash "$SCRIPTS/check-frontmat
 expect_pass "clean tree: company-bind lint passes" bash "$SCRIPTS/vendor/lint-skill-company-bind.sh" "$root/skills"
 expect_pass "clean tree: commands.json is current" bash "$SCRIPTS/vendor/skill-inventory.sh" --root "$root" --check
 expect_pass "repo tree: check.sh passes" bash "$SCRIPTS/check.sh"
+expect_pass "clean tree: check-no-lanes-alias passes" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
 
 # --- package.json / package.yaml sync ---------------------------------------------
 
@@ -131,7 +132,7 @@ expect_fail "engines hq-cli differs from requires.hqCli: fails" \
 expect_fail "engines hq-cli mismatch fails check.sh on manifest-sync" "FAILED: manifest-sync" bash "$SCRIPTS/check.sh" "$root"
 
 root="$(make_fixture)"
-replace_line "$root/package.yaml" "  hqCli: '>=5.345.161'" "  hqCli: '>=5.400.0'"
+replace_line "$root/package.yaml" "  hqCli: '>=5.345.210'" "  hqCli: '>=5.400.0'"
 expect_fail "requires.hqCli raised without package.json engines: fails" \
   'package.yaml requires.hqCli is ">=5.400.0"' node "$SCRIPTS/check-manifest-sync.mjs" "$root"
 
@@ -314,6 +315,35 @@ if node -e 'const d=require(process.argv[1]); const e=d.skills.find(s=>s.invoke=
 else
   not_ok "commands.json lists a new skill unprefixed with scope core and skips _shared" "$(head -c 400 "$root/commands.json")"
 fi
+
+# --- no lanes alias ---------------------------------------------------------
+
+root="$(make_fixture)"
+expect_pass "no lanes alias: untouched fixture passes" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+
+root="$(make_fixture)"
+listed_skill "$root" foo 'name: foo
+description: Fixture skill.' 'Run `hq lanes list` before starting.'
+expect_fail "skill containing literal hq lanes fails check-no-lanes-alias" \
+  "skills/foo/SKILL.md:6:" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+expect_fail "skill containing literal hq lanes fails check.sh on no-lanes-alias" \
+  "FAILED: no-lanes-alias" bash "$SCRIPTS/check.sh" "$root"
+if grep -q "FAILED: no-lanes-alias$" <<<"$OUT"; then ok "skill containing literal hq lanes: no other check fails"; else not_ok "skill containing literal hq lanes: no other check fails" "$OUT"; fi
+
+root="$(make_fixture)"
+insert_after "$root/commands.json" '      "name": "prd",' '      "note": "hq lanes",'
+expect_fail "commands.json containing literal hq lanes fails check-no-lanes-alias" \
+  "commands.json:" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+
+# A file grep cannot read must not be reported as clean.
+root="$(make_fixture)"
+write_skill "$root" unreadable 'name: unreadable
+description: Fixture skill.' 'Run `hq lanes list` before starting.'
+chmod 000 "$root/skills/unreadable/SKILL.md"
+expect_fail "unreadable skill file fails check-no-lanes-alias instead of passing" \
+  "could not read every file" bash "$SCRIPTS/check-no-lanes-alias.sh" "$root"
+if [[ "$RC" == 2 ]]; then ok "unreadable skill file: exit code is 2"; else not_ok "unreadable skill file: exit code is 2" "rc=$RC"; fi
+chmod 644 "$root/skills/unreadable/SKILL.md"
 
 # --- manifests and CI ---------------------------------------------------------------
 
